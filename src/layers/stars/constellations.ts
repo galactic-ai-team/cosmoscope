@@ -58,8 +58,8 @@ const PATTERNS: readonly Pattern[] = [
   },
 ];
 
-const FADE_START_LY = 400;
-const FADE_END_LY = 1_000;
+const FADE_START_LY = 30;
+const FADE_END_LY = 100;
 
 function normalize(name: string): string {
   return name
