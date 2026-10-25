@@ -24,7 +24,7 @@ Agreed in chat on 2026-10-25. Each owner edits their own section; anything that 
 - `flyTo({ kind, id, approach: 'orbit' | 'surface' | 'flyby' })` returns `{ promise, cancel }`, interpolating in log distance. Code: PR #2.
 
 ## Catalog (Lumi)
-- Every layer calls `register(entries)` from `src/catalog.ts` with stable ids shaped `<kind>:<catalog>:<id>` for catalogued objects (`star:hyg:32263`, `galaxy:messier:M31`, `galaxy:sdss:<objid>` for SDSS objects) and `planet:<name>` for solar-system bodies (`planet:mars`). One-off objects with no catalog id use the `common` catalog (`galaxy:common:milkyway`, `star:sol:sun` is the Sun's special case).
+- Every layer calls `register(entries)` from `src/catalog.ts` with stable ids shaped `<kind>:<catalog>:<id>` for catalogued objects (`star:hyg:32263`, `galaxy:messier:M31`, `galaxy:sdss:<objid>` for SDSS objects, `galaxy:pgc:<n>` for Local Group dwarfs and the Magellanic Clouds from the PGC/HyperLEDA catalog) and `planet:<name>` for solar-system bodies (`planet:mars`). One-off objects with no catalog id use the `common` catalog (`galaxy:common:milkyway`, `star:sol:sun` is the Sun's special case).
 - Layer handoffs (distance where one layer fades out and the next fades in) are agreed between the two lane owners and listed here. Proposed: stars to galaxies at about 100k ly (Nova, pending GPT-6).
 - The info panel reads `name`, `aliases`, `kind`, `distanceM` (metres from the Sun), `facts` and `blurb`.
 - Search calls `flyTo({ kind, id, approach: 'orbit' })` when a result is picked and opens the info panel when `.promise` resolves.
