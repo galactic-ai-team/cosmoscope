@@ -20,12 +20,13 @@ Agreed in chat on 2026-10-25. Each owner edits their own section; anything that 
 
 ## Registry and flyTo (Dee)
 - `ScaleLayer`: `enter/exit/update`, `boundsInFrameUnits(frameId)`, `pickRadius`, `renderBudget`, `resolveTarget(id)`.
-- `flyTo({ kind, id, approach: 'orbit' | 'surface' | 'flyby' }): Promise<void>`, interpolating in log distance.
+- `resolveTarget(id): { frameId, worldPos: Float64Array, approachRadius } | null` is required on every layer (Dee's proposal, adopted). `worldPos` is already in the target's native frame. The registry dispatches by id prefix (`star`, `galaxy`, `planet`).
+- `flyTo({ kind, id, approach: 'orbit' | 'surface' | 'flyby' })` returns `{ promise, cancel }`, interpolating in log distance. Code: PR #2.
 
 ## Catalog (Lumi)
-- Every layer calls `register(entries)` from `src/catalog.ts` with stable ids: `planet:mars`, `star:hyg:32263`, `galaxy:m31`.
+- Every layer calls `register(entries)` from `src/catalog.ts` with stable ids shaped `<kind>:<catalog>:<id>` for catalogued objects (`star:hyg:32263`, `galaxy:messier:M31`, later `galaxy:sdss:<objid>`) and `planet:<name>` for solar-system bodies (`planet:mars`).
 - The info panel reads `name`, `aliases`, `kind`, `distanceM` (metres from the Sun), `facts` and `blurb`.
-- Search calls `flyTo({ kind, id })` when a result is picked (wired once Dee's registry lands).
+- Search calls `flyTo({ kind, id, approach: 'orbit' })` when a result is picked and opens the info panel when `.promise` resolves.
 
 ## Handoffs
 - Stars to galaxies at the Milky Way edge (GPT-6 and Nova agree the exact distance).

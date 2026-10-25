@@ -3,7 +3,7 @@
 export type EntryKind = 'planet' | 'moon' | 'star' | 'galaxy' | 'nebula' | 'cluster' | 'structure';
 
 export interface CatalogEntry {
-  id: string;            // stable, e.g. 'planet:mars', 'star:hyg:32263', 'galaxy:m31'
+  id: string;            // stable, e.g. 'planet:mars', 'star:hyg:32263', 'galaxy:messier:M31'
   name: string;          // display name
   aliases?: string[];    // e.g. ['Andromeda', 'NGC 224']
   kind: EntryKind;
