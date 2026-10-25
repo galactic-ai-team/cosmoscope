@@ -3,7 +3,8 @@
 // Cosmoscope and flies straight there. Ids follow docs/CONTRACTS.md.
 
 const KEY = 'to';
-const ID_RE = /^[a-z]+:[a-z0-9_-]+:[^\s#&]+$/i;
+// <kind>:<catalog>:<id>, or the two-part planet:<name> form from CONTRACTS.
+const ID_RE = /^[a-z]+:[a-z0-9_-]+(?::[^\s#&]+)?$/i;
 
 /** Read a target id from a location hash ("#to=<id>"), or null if absent/invalid. */
 export function parseDeepLink(hash: string): string | null {

@@ -28,4 +28,9 @@ describe('deep links', () => {
     onHash();
     expect(picks).toEqual(['galaxy:messier:M31', 'star:sol:sun']);
   });
+  it('accepts the two-part planet:<name> ids from CONTRACTS', () => {
+    expect(parseDeepLink('#to=planet:mars')).toBe('planet:mars');
+    expect(parseDeepLink('#to=planet')).toBeNull();
+    expect(parseDeepLink('#to=planet:')).toBeNull();
+  });
 });
