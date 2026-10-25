@@ -37,6 +37,7 @@ export function mountConstellationToggle(
   let mode = initial;
   const btn = doc.createElement('button');
   btn.id = 'constellations-btn';
+  btn.dataset.labelExclude = '';
   btn.type = 'button';
   btn.title = 'Constellation lines (C)';
   btn.style.cssText = 'position:fixed;z-index:6;top:16px;right:58px;height:34px;padding:0 12px;border-radius:999px;'

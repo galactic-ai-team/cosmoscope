@@ -60,6 +60,7 @@ export interface FrameApi {
   lookAt(point: Vec3Like, frameId?: FrameId): void;
   getTargetPosition(frameId?: FrameId, out?: Float64Array): Float64Array | null;
   getCameraForward(out?: Float64Array): Float64Array;
+  getCameraUp(out?: Float64Array): Float64Array;
   distanceTo(point: FramedPoint): number;
   onRebase(listener: RebaseListener): () => void;
 }
@@ -184,6 +185,12 @@ export class CosmoCamera implements FrameApi {
     out[0] = d.x;
     out[1] = d.y;
     out[2] = d.z;
+    return out;
+  }
+
+  /** The camera's unit up vector in the shared ICRS axes. Pass `out` to avoid allocating. */
+  getCameraUp(out: Float64Array = new Float64Array(3)): Float64Array {
+    copy3(this.up, out);
     return out;
   }
 
