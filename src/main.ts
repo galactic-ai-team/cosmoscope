@@ -21,6 +21,7 @@ import { linkDeepLinks } from './ui/deepLink';
 import { makeZoneHud } from './ui/zone';
 import { linkSearchToFlight, kindFromId, flightKind, type Flyer } from './ui/flyLink';
 import { createTour } from './ui/tour';
+import { mountHelp } from './ui/help';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -172,3 +173,6 @@ renderer.setAnimationLoop((ms: number) => {
   zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
   renderer.render(scene, camera.three);
 });
+
+// Help overlay (Lumi): ? key or top-right button.
+mountHelp();
