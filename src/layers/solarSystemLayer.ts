@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
-import { FrameApi } from '../core/camera';
+import { FrameApi, CosmoCamera } from '../core/camera';
 import { FrameId } from '../core/frames';
-import type { CosmoCamera } from '../core/camera';
 import { register, CatalogEntry } from '../catalog';
 
 interface PlanetData {
@@ -50,7 +49,7 @@ const PLANETS: PlanetData[] = [
     color: 0xc1440e, 
     moons: [
       { name: 'Phobos', id: 'moon:phobos', distance: 0.015, radius: 0.6, color: 0x887766, speed: 20.0 },
-      { name: 'Deimos', id: 'moon:deimos', distance: 0.025, radius: 0.4, color: 0x776655, speed: 15.0 }
+      { name: 'Deimos', id: 'moon:deimos', distance: 0.04, radius: 0.4, color: 0x776655, speed: 15.0 }
     ] 
   },
   { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomalyJ2000: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
@@ -60,6 +59,8 @@ const PLANETS: PlanetData[] = [
 ];
 
 export class SolarSystemLayer implements ScaleLayer {
+  public static readonly ORIGIN = new Float64Array([0, 0, 0]);
+
   public idPrefix = 'planet';
   public frames: FrameId[] = ['helio'];
   public minZoom = 1e3;
@@ -75,22 +76,21 @@ export class SolarSystemLayer implements ScaleLayer {
     meanAnomalyJ2000: number; 
     meanMotion: number;
     approachRadius: number;
+    worldPos: THREE.Vector3;
     moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
   private scene: THREE.Scene;
-  private camera?: CosmoCamera;
-  private static readonly ORIGIN = new Float64Array([0, 0, 0]);
+  private camera: CosmoCamera;
   private daysSinceJ2000 = 0;
   private isInitialized = false;
 
-  constructor(scene: THREE.Scene, camera?: CosmoCamera) {
+  constructor(scene: THREE.Scene, camera: CosmoCamera) {
     this.scene = scene;
     this.camera = camera;
     this.container = new THREE.Group();
     this.container.name = 'SolarSystemLayer';
 
-    // Compute exact days elapsed from J2000.0 epoch to current date
     const j2000Epoch = Date.UTC(2000, 0, 1, 12, 0, 0);
     const now = Date.now();
     this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
@@ -102,7 +102,7 @@ export class SolarSystemLayer implements ScaleLayer {
     if (this.isInitialized) return;
     this.isInitialized = true;
 
-    // 1. Create Sun at origin (0,0,0) AU with minimum visible radius in AU space
+    // Sun at origin (0,0,0) AU
     const sunRadiusAU = 0.08;
     const sunGeo = new THREE.SphereGeometry(sunRadiusAU, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
@@ -110,25 +110,26 @@ export class SolarSystemLayer implements ScaleLayer {
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
 
-    // Sun light
-    const sunLight = new THREE.PointLight(0xffffff, 2, 50);
+    // Ambient light + zero-decay point light for outer planets like Saturn
+    const ambientLight = new THREE.AmbientLight(0x555555);
+    this.container.add(ambientLight);
+
+    const sunLight = new THREE.PointLight(0xffffff, 3.0, 0, 0);
     this.container.add(sunLight);
 
     const catalogEntries: CatalogEntry[] = [];
 
-    // 2. Create Planets and Moons positioned in pure AU coordinates
     PLANETS.forEach((data) => {
       const pivot = new THREE.Group();
       this.container.add(pivot);
 
       const auDist = data.semiMajorAxis; 
-      // Ensure minimum visible on-screen size in AU coordinate space so small planets remain clear
       const auRadius = Math.max(data.radius * 0.002, 0.025);
 
       const planetGeo = new THREE.SphereGeometry(auRadius, 24, 24);
       const planetMat = new THREE.MeshStandardMaterial({ 
         color: data.color,
-        roughness: 0.8,
+        roughness: 0.6,
         metalness: 0.1
       });
       const planetMesh = new THREE.Mesh(planetGeo, planetMat);
@@ -144,7 +145,6 @@ export class SolarSystemLayer implements ScaleLayer {
         blurb: `${data.name} is a planet in our Solar System.`
       });
 
-      // Orbit line in AU
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
       const segments = 128;
@@ -157,7 +157,6 @@ export class SolarSystemLayer implements ScaleLayer {
       const orbitLine = new THREE.Line(orbitGeo, orbitMat);
       this.container.add(orbitLine);
 
-      // Handle Moons
       let moonEntries: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] = [];
       if (data.moons) {
         data.moons.forEach((moonData) => {
@@ -166,7 +165,7 @@ export class SolarSystemLayer implements ScaleLayer {
 
           const moonAuRadius = Math.max(moonData.radius * 0.0015, 0.01);
           const moonGeo = new THREE.SphereGeometry(moonAuRadius, 16, 16);
-          const moonMat = new THREE.MeshStandardMaterial({ color: moonData.color });
+          const moonMat = new THREE.MeshStandardMaterial({ color: moonData.color, roughness: 0.8 });
           const moonMesh = new THREE.Mesh(moonGeo, moonMat);
           const moonAuDist = auRadius + moonData.distance;
           moonMesh.position.x = moonAuDist;
@@ -192,6 +191,7 @@ export class SolarSystemLayer implements ScaleLayer {
         meanAnomalyJ2000: data.meanAnomalyJ2000,
         meanMotion: data.meanMotion,
         approachRadius: auRadius * 3.0,
+        worldPos: new THREE.Vector3(auDist, 0, 0),
         moons: moonEntries
       });
     });
@@ -206,16 +206,12 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public update(dt: number): void {
-    this.daysSinceJ2000 += dt * 5.0;
+    // 500x real-time scale
+    const timeScale = 500.0;
+    this.daysSinceJ2000 += (dt / 86400) * timeScale;
 
-    // Lumi: Claude's camera recipe. Meshes are authored in AU around the Sun,
-    // so place the container camera-relative and scale AU to render units.
-    // Without this the container sits at render origin (the camera) and
-    // planets are off-screen when you arrive.
-    if (this.camera) {
-      this.camera.toCameraRelative(SolarSystemLayer.ORIGIN, 'helio', this.container.position);
-      this.container.scale.setScalar(this.camera.layerScale('helio'));
-    }
+    this.camera.toCameraRelative(SolarSystemLayer.ORIGIN, 'helio', this.container.position);
+    this.container.scale.setScalar(this.camera.layerScale('helio'));
 
     if (this.sunMesh) {
       this.sunMesh.rotation.y += dt * 0.05;
@@ -229,9 +225,10 @@ export class SolarSystemLayer implements ScaleLayer {
         E = M + item.eccentricity * Math.sin(E);
       }
 
-      // Compute exact heliocentric positions in AU
       const xAU = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
       const zAU = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
+
+      item.worldPos.set(xAU, 0, zAU);
 
       item.mesh.position.x = xAU;
       item.mesh.position.z = zAU;
@@ -246,25 +243,13 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public resolveTarget(id: string) {
-    const planetIndex = PLANETS.findIndex(p => p.id === id);
-    if (planetIndex !== -1) {
-      const data = PLANETS[planetIndex];
-      const M = (data.meanAnomalyJ2000 + data.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
-      let E = M;
-      for (let iter = 0; iter < 3; iter++) {
-        E = M + data.eccentricity * Math.sin(E);
-      }
-      const xAU = data.semiMajorAxis * (Math.cos(E) - data.eccentricity);
-      const zAU = data.semiMajorAxis * Math.sqrt(1 - data.eccentricity * data.eccentricity) * Math.sin(E);
-
-      const worldPos = new Float64Array([xAU, 0, zAU]);
-      const foundMesh = this.planetMeshes.find(p => p.mesh.name === id);
-      const approachRadius = foundMesh ? foundMesh.approachRadius : 0.1;
-
+    const found = this.planetMeshes.find(p => p.mesh.name === id);
+    if (found) {
+      const worldPos = new Float64Array([found.worldPos.x, found.worldPos.y, found.worldPos.z]);
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius
+        approachRadius: found.approachRadius
       };
     }
 
@@ -280,7 +265,7 @@ export class SolarSystemLayer implements ScaleLayer {
     return null;
   }
 
-  public exit(): void {
+    public exit(): void {
     if (this.container.parent) {
       this.container.parent.remove(this.container);
     }
