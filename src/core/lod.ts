@@ -3,8 +3,7 @@
 // Consumed by LayerRegistry (layers.ts) — computes a LodState per layer each
 // frame and hands it to ScaleLayer.update() as an optional 4th argument.
 
-import type { FrameApi } from './camera';
-import type { FramedPoint } from './frames';
+import type { FrameApi, FramedPoint } from './camera';
 
 export interface LodTier {
   /** Max distance (metres) at which this tier is eligible to draw. */
@@ -37,8 +36,14 @@ export interface LodState {
   readonly crossfade: number;
   /** 0..1 normalized budget share across active layers. */
   readonly budgetFrac: number;
-  /** Distance (metres) used for tier selection this frame. */
+  /** Distance (metres) used for tier selection this frame (the tier's anchor). */
   readonly focusDistance: number;
+  /**
+   * Always the camera→focus distance, regardless of which anchor drove tier
+   * selection. Lets a layer override its own near-tier behavior — e.g. stars
+   * drawing an extra near-camera tier even when Sun-anchored tiers say "far".
+   */
+  readonly cameraFocusDistance: number;
   /**
    * Which anchor produced focusDistance. "tier" = tier's own anchor,
    * "layer-default" = layer.defaultAnchor, "camera-focus" = FocusApi.getFocusDistance(),
@@ -60,6 +65,7 @@ export interface MutableLodState {
   crossfade: number;
   budgetFrac: number;
   focusDistance: number;
+  cameraFocusDistance: number;
   focusId: LodState['focusId'];
   heldByHysteresis: boolean;
 }
@@ -70,6 +76,7 @@ export function makeLodState(): MutableLodState {
     crossfade: 0,
     budgetFrac: 0,
     focusDistance: Infinity,
+    cameraFocusDistance: Infinity,
     focusId: null,
     heldByHysteresis: false,
   };
@@ -116,13 +123,12 @@ export function validateLodTiers(tiers: LodTier[], idPrefix: string): void {
 }
 
 /**
- * Compute the tier selection for a layer given its current distance.
+ * Pure tier math. Takes a distance already resolved against the appropriate
+ * anchor; does NOT touch FrameApi or anchors — that's the registry's job.
+ *
  * Respects hysteresis: to move UP (nearer, higher detail), distance must be
  * <= tier.maxDistance; to move DOWN (farther, lower detail), distance must
  * exceed tier.maxDistance * HYSTERESIS_RATIO.
- *
- * `currentLevel` is the layer's level from last frame (-1 = inactive).
- * Returns the new level (-1 = inactive) and whether hysteresis held.
  */
 export function selectTier(
   tiers: LodTier[],
@@ -135,8 +141,6 @@ export function selectTier(
       ? tiers[prevLevel].maxDistance
       : Infinity;
 
-  // If currently active and distance is within the hysteresis band above
-  // prevMax (i.e. prevMax < distance <= prevMax * HYSTERESIS_RATIO), hold.
   if (prevLevel >= 0 && distance > prevMax && distance <= prevMax * HYSTERESIS_RATIO) {
     return { level: prevLevel, heldByHysteresis: true };
   }
@@ -158,7 +162,10 @@ export function computeCrossfade(tier: LodTier, distance: number): number {
   return (tier.maxDistance - distance) / fadeInDist;
 }
 
-/** Resolve the focusDistance for a tier given the layer and API. */
+/**
+ * Resolve the tier's anchor distance and focusId. Called by the registry
+ * before selectTier; selectTier itself stays pure.
+ */
 export function resolveTierDistance(
   tier: LodTier,
   layerDefaultAnchor: FramedPoint | undefined,
