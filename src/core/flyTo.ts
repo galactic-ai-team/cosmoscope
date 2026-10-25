@@ -1,8 +1,10 @@
 // src/core/flyTo.ts
 // Camera flight between frames, in log-space distance. Resolves a target via
 // the layer registry and animates Claude's frame API through frame boundaries.
+// Time is in seconds (matches main.ts loop). All frames share ICRS axes, so
+// interpolation is position-only — no axis rotation between frames.
 
-import type { FrameId, FrameApi } from './frames';
+import type { FrameApi, FrameId } from './camera';
 import type { LayerRegistry, ResolvedTarget } from './layers';
 
 export type TargetKind = 'planet' | 'star' | 'galaxy';
@@ -28,19 +30,20 @@ const APPROACH_SCALE: Record<Approach, number> = {
   flyby: 8.0,
 };
 
-/** Minimum flight duration regardless of distance. */
-const MIN_DURATION_MS = 600;
-/** Maximum flight duration; longer flights get eased faster so users aren't stuck. */
-const MAX_DURATION_MS = 2400;
+/** Minimum flight duration in seconds. */
+const MIN_DURATION_S = 0.6;
+/** Maximum flight duration in seconds. */
+const MAX_DURATION_S = 2.4;
 
 interface FlightState {
   cancelled: boolean;
   startTime: number;
   duration: number;
-  startPos: Float64Array;
   startFrame: FrameId;
+  startPos: Float64Array;
+  startDist: number;
   target: ResolvedTarget;
-  endDistance: number;
+  endDist: number;
   resolve: () => void;
 }
 
@@ -54,11 +57,10 @@ export class FlyToController {
 
   /**
    * Start a flight to the target. Cancels any flight in progress.
-   * Uses log-space distance so Earth->galaxy doesn't feel like a stall
-   * followed by a blur.
+   * `now` is seconds (same clock as main.ts loop). If omitted, uses
+   * performance.now()/1000 — but callers should pass the loop's time.
    */
-  flyTo(target: FlyToTarget): FlyToHandle {
-    // Resolve target via registry.
+  flyTo(target: FlyToTarget, now = performance.now() / 1000): FlyToHandle {
     const resolved = this.registry.resolveTarget(target.id);
     if (!resolved) {
       return {
@@ -67,30 +69,28 @@ export class FlyToController {
       };
     }
 
-    // Cancel any existing flight.
     if (this.state) {
       this.state.cancelled = true;
       this.state.resolve();
       this.state = null;
     }
 
-    // Camera state at flight start.
+    // Camera state at flight start, in the target's frame.
     const startPos = new Float64Array(3);
-    this.api.getCameraWorldPosition(startPos);
-    const startFrame = this.api.getFrameId();
+    this.api.getCameraWorldPosition(resolved.frameId, startPos);
+    const startDist = Math.hypot(startPos[0], startPos[1], startPos[2]);
 
-    // Compute target distance in frame units.
-    const endDistance =
-      resolved.approachRadius * APPROACH_SCALE[target.approach];
+    const endDist = resolved.approachRadius * APPROACH_SCALE[target.approach];
 
     // Duration scales with log distance ratio, clamped.
-    const startDist = this.api.getCameraDistanceToOrigin();
-    const endDist = endDistance;
-    const ratio = Math.max(1, Math.max(startDist, endDist) / Math.max(1e-12, Math.min(startDist, endDist)));
+    const ratio = Math.max(
+      1,
+      Math.max(startDist, endDist) / Math.max(1e-12, Math.min(startDist, endDist)),
+    );
     const logRatio = Math.log10(ratio);
     const duration = Math.max(
-      MIN_DURATION_MS,
-      Math.min(MAX_DURATION_MS, MIN_DURATION_MS + logRatio * 300),
+      MIN_DURATION_S,
+      Math.min(MAX_DURATION_S, MIN_DURATION_S + logRatio * 0.3),
     );
 
     let resolveFn: () => void = () => {};
@@ -100,12 +100,13 @@ export class FlyToController {
 
     this.state = {
       cancelled: false,
-      startTime: performance.now(),
+      startTime: now,
       duration,
+      startFrame: this.api.getFrameId(),
       startPos,
-      startFrame,
+      startDist,
       target: resolved,
-      endDistance,
+      endDist,
       resolve: resolveFn,
     };
 
@@ -122,8 +123,8 @@ export class FlyToController {
   }
 
   /**
-   * Tick the flight. Call every frame from the render loop after the frame
-   * API has computed the current frame. Returns true if a flight is active.
+   * Tick the flight. Call every frame from main.ts after the camera is
+   * updated. `now` is seconds. Returns true if a flight is active.
    */
   update(now: number): boolean {
     const s = this.state;
@@ -134,44 +135,38 @@ export class FlyToController {
 
     const elapsed = now - s.startTime;
     const rawT = Math.min(1, elapsed / s.duration);
-    // Smoothstep ease in log-space distance.
+    // Smoothstep ease in log-distance.
     const eased = rawT * rawT * (3 - 2 * rawT);
 
-    // Interpolate distance in log space (this is the key: linear interpolation
-    // of distance would speed up/whoosh near the end; log-space keeps perceived
-    // speed uniform).
-    const startDist = length(s.startPos);
-    const startLog = Math.log10(Math.max(1e-12, startDist));
-    const endLog = Math.log10(Math.max(1e-12, s.endDistance));
+    // Interpolate distance in log space: uniform perceived speed.
+    const startLog = Math.log10(Math.max(1e-12, s.startDist));
+    const endLog = Math.log10(Math.max(1e-12, s.endDist));
     const curLog = startLog + (endLog - startLog) * eased;
     const curDist = Math.pow(10, curLog);
 
-    // Interpolate position: linear in world space but normalized to curDist so
-    // the flight path arcs rather than diving through the origin.
+    // Interpolate direction on the unit sphere (all frames share ICRS axes,
+    // so a direction is frame-independent). Normalize both, lerp, renormalize.
+    const sx = s.startPos[0], sy = s.startPos[1], sz = s.startPos[2];
+    const sLen = Math.max(1e-12, Math.hypot(sx, sy, sz));
+    const dsx = sx / sLen, dsy = sy / sLen, dsz = sz / sLen;
+
     const tx = s.target.worldPos[0];
     const ty = s.target.worldPos[1];
     const tz = s.target.worldPos[2];
     const tLen = Math.max(1e-12, Math.hypot(tx, ty, tz));
-    const ux = tx / tLen;
-    const uy = ty / tLen;
-    const uz = tz / tLen;
+    const dtx = tx / tLen, dty = ty / tLen, dtz = tz / tLen;
 
-    // Direction: blend start direction toward target direction.
-    const sx = s.startPos[0], sy = s.startPos[1], sz = s.startPos[2];
-    const sLen = Math.max(1e-12, Math.hypot(sx, sy, sz));
-    const dsx = sx / sLen, dsy = sy / sLen, dsz = sz / sLen;
-    const dx = dsx + (ux - dsx) * eased;
-    const dy = dsy + (uy - dsy) * eased;
-    const dz = dsz + (uz - dsz) * eased;
+    let dx = dsx + (dtx - dsx) * eased;
+    let dy = dsy + (dty - dsy) * eased;
+    let dz = dsz + (dtz - dsz) * eased;
     const dLen = Math.max(1e-12, Math.hypot(dx, dy, dz));
+    dx /= dLen; dy /= dLen; dz /= dLen;
 
     const outPos = new Float64Array(3);
-    outPos[0] = (dx / dLen) * curDist;
-    outPos[1] = (dy / dLen) * curDist;
-    outPos[2] = (dz / dLen) * curDist;
+    outPos[0] = dx * curDist;
+    outPos[1] = dy * curDist;
+    outPos[2] = dz * curDist;
 
-    // Set frame based on the target's frame — Claude's frame API should
-    // rebase any layers when the frame changes.
     this.api.setCameraFrameAndPosition(s.target.frameId, outPos);
 
     if (rawT >= 1) {
@@ -186,8 +181,4 @@ export class FlyToController {
   get active(): boolean {
     return this.state !== null && !this.state.cancelled;
   }
-}
-
-function length(v: Float64Array): number {
-  return Math.hypot(v[0], v[1], v[2]);
 }

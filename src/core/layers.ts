@@ -1,14 +1,13 @@
 // src/core/layers.ts
 // ScaleLayer registry. Owns active-layer resolution, crossfades and LOD
-// selection on top of Claude's frame API. Layers are registered once at
-// startup and never removed (the universe doesn't unload).
+// selection on top of Claude's frame API (src/core/camera.ts).
 
-import type { FrameId, FrameApi } from './frames';
+import type { FrameApi, FrameId } from './camera';
 
 /** A resolvable searchable target, returned by a layer. */
 export interface ResolvedTarget {
   frameId: FrameId;
-  /** World position in the target's frame, float64. */
+  /** World position in the target's native frame, float64, length 3. */
   worldPos: Float64Array;
   /** Suggested approach distance in frame units (e.g. 3× body radius). */
   approachRadius: number;
@@ -70,11 +69,12 @@ export class LayerRegistry {
   /**
    * Per-frame tick. Activates/deactivates layers by frame, advances
    * crossfades, and drives each active layer's update with its camera
-   * distance. `crossfadeMs` is how long a boundary blend takes.
+   * distance. `crossfadeSeconds` is how long a boundary blend takes.
+   * `dt` should be clamped by the caller (main.ts clamps to 0.1).
    */
-  update(dt: number, crossfadeMs = 400): void {
+  update(dt: number, crossfadeSeconds = 0.4): void {
     const frame = this.api.getFrameId();
-    const step = crossfadeMs > 0 ? dt * (1000 / crossfadeMs) : 1;
+    const step = crossfadeSeconds > 0 ? dt / crossfadeSeconds : 1;
 
     for (const entry of this.entries.values()) {
       const shouldBeActive = entry.layer.frames.includes(frame);
@@ -84,7 +84,6 @@ export class LayerRegistry {
         entry.active = true;
       }
 
-      // Advance opacity toward target.
       const target = shouldBeActive ? 1 : 0;
       if (entry.opacity < target) entry.opacity = Math.min(1, entry.opacity + step);
       else if (entry.opacity > target) entry.opacity = Math.max(0, entry.opacity - step);
@@ -96,7 +95,9 @@ export class LayerRegistry {
       }
 
       if (entry.active) {
-        const dist = this.api.getCameraDistanceToOrigin();
+        const pos = new Float64Array(3);
+        this.api.getCameraWorldPosition(this.api.getFrameId(), pos);
+        const dist = Math.hypot(pos[0], pos[1], pos[2]);
         entry.layer.update(dt, dist, this.api);
       }
     }
