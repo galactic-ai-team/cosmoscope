@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { CosmoCamera } from '../../core/camera';
 import type { HygRow } from './catalog';
+import {
+  isLabelBlocked,
+  type LabelRect,
+} from './labelCollision';
 
 const MAX_LABELS = 24;
 const MAX_LABEL_DISTANCE_LY = 1_500;
@@ -10,13 +14,6 @@ const PC_TO_LY = 3.26156;
 const LABEL_SCALE = 0.025;
 const COLLISION_PADDING_PX = 7;
 
-type Rect = {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-};
-
 type StarLabel = {
   row: HygRow;
   sprite: THREE.Sprite;
@@ -24,17 +21,8 @@ type StarLabel = {
   texture: THREE.CanvasTexture;
   position: Float64Array;
   textFraction: number;
-  rect: Rect;
+  rect: LabelRect;
 };
-
-function overlaps(a: Rect, b: Rect): boolean {
-  return (
-    a.left < b.right &&
-    a.right > b.left &&
-    a.top < b.bottom &&
-    a.bottom > b.top
-  );
-}
 
 /**
  * Brightest-first stellar labels.
@@ -45,31 +33,36 @@ export class StellarLabels {
   readonly object3D = new THREE.Group();
 
   private readonly labels: StarLabel[] = [];
-  private readonly occupied: Rect[] = [];
+  private readonly occupied: LabelRect[] = [];
 
-  private static readonly EXCLUSION_IDS = [
-    'search',
-    'info',
-    'help',
-    'help-btn',
-    'constellations-btn',
-    'zone',
-    'tour',
-    'scale',
-  ] as const;
-
-  private readonly exclusions: Rect[] = Array.from(
-    { length: StellarLabels.EXCLUSION_IDS.length },
-    () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
-  );
-
+  private readonly exclusions: LabelRect[] = [];
   private exclusionCount = 0;
+
+  // Reusable rectangles. The array grows only when more
+  // exclusion elements are discovered than before.
+  private acquireExclusion(index: number): LabelRect {
+    if (!this.exclusions[index]) {
+      const rect = {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+      };
+
+      this.exclusions.push(rect);
+    }
+
+    return this.exclusions[index];
+  }
 
   private readonly scratch = new THREE.Vector3();
   private readonly cameraSpace = new THREE.Vector3();
   private readonly projected = new THREE.Vector3();
 
-  constructor(private readonly camera: CosmoCamera) {
+  constructor(
+    private readonly camera: CosmoCamera,
+    private readonly canvas?: HTMLCanvasElement,
+  ) {
     this.object3D.name = 'stellar-labels';
   }
 
@@ -158,10 +151,7 @@ export class StellarLabels {
     const active = opacity > 0.001;
 
     const cam = this.camera.three;
-    const canvas = document.querySelector<HTMLCanvasElement>(
-      '#app canvas',
-    );
-    const viewport = canvas?.getBoundingClientRect();
+    const viewport = this.canvas?.getBoundingClientRect();
 
     const viewportLeft = viewport?.left ?? 0;
     const viewportTop = viewport?.top ?? 0;
@@ -173,23 +163,32 @@ export class StellarLabels {
     this.occupied.length = 0;
     this.exclusionCount = 0;
 
-    for (const id of StellarLabels.EXCLUSION_IDS) {
-      const el = document.getElementById(id);
+    const elements = document.querySelectorAll<HTMLElement>(
+      '[data-label-exclude]',
+    );
 
+    for (const el of elements) {
       if (
-        !el ||
         el.hidden ||
         getComputedStyle(el).display === 'none'
-      ) continue;
+      ) {
+        continue;
+      }
 
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
+      const bounds = el.getBoundingClientRect();
 
-      const zone = this.exclusions[this.exclusionCount++];
-      zone.left = r.left;
-      zone.top = r.top;
-      zone.right = r.right;
-      zone.bottom = r.bottom;
+      if (bounds.width <= 0 || bounds.height <= 0) {
+        continue;
+      }
+
+      const zone = this.acquireExclusion(
+        this.exclusionCount++,
+      );
+
+      zone.left = bounds.left;
+      zone.top = bounds.top;
+      zone.right = bounds.right;
+      zone.bottom = bounds.bottom;
     }
 
     for (const label of this.labels) {
@@ -258,27 +257,16 @@ export class StellarLabels {
       rect.top = y - heightPx - pad;
       rect.bottom = y + pad;
 
-      let blocked = false;
-
-      // Keep the brighter labels already accepted.
-      for (const other of this.occupied) {
-        if (overlaps(rect, other)) {
-          blocked = true;
-          break;
-        }
+      if (
+        isLabelBlocked(
+          rect,
+          this.occupied,
+          this.exclusions,
+          this.exclusionCount,
+        )
+      ) {
+        continue;
       }
-
-      // Prevent labels from overlapping HUD and controls.
-      if (!blocked) {
-        for (let i = 0; i < this.exclusionCount; i++) {
-          if (overlaps(rect, this.exclusions[i])) {
-            blocked = true;
-            break;
-          }
-        }
-      }
-
-      if (blocked) continue;
 
       this.occupied.push(rect);
       sprite.visible = true;
