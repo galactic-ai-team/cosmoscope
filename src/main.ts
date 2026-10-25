@@ -74,7 +74,7 @@ function adaptStub(stub: StubLayer, extraFrames: FrameId[] = []): ScaleLayer {
 // Nova's galaxies layer implements ScaleLayer directly (createGalaxiesLayer + clustersRoute).
 registry.register(createGalaxiesLayer(scene, camera));
 registry.register(clustersRoute);
-registry.register(new SolarSystemLayer(scene));
+registry.register(new SolarSystemLayer(scene, camera));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
