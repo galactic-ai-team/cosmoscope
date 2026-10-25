@@ -172,7 +172,7 @@ def main():
         "points": points,
     }
     with open(args.output, "w") as handle:
-        json.dump(output, handle, indent=1)
+        json.dump(output, handle, separators=(",", ":"))
 
     if chosen:
         dc_min = min(r["dc"] for r in chosen)
