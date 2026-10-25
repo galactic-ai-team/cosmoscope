@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
-import { FrameApi } from '../core/camera';
+import { FrameApi, CosmoCamera, toCameraRelative, layerScale, ORIGIN } from '../core/camera';
 import { FrameId } from '../core/frames';
 import { register, CatalogEntry } from '../catalog';
 
@@ -49,7 +49,7 @@ const PLANETS: PlanetData[] = [
     color: 0xc1440e, 
     moons: [
       { name: 'Phobos', id: 'moon:phobos', distance: 0.015, radius: 0.6, color: 0x887766, speed: 20.0 },
-      { name: 'Deimos', id: 'moon:deimos', distance: 0.025, radius: 0.4, color: 0x776655, speed: 15.0 }
+      { name: 'Deimos', id: 'moon:deimos', distance: 0.04, radius: 0.4, color: 0x776655, speed: 15.0 }
     ] 
   },
   { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomalyJ2000: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
@@ -74,16 +74,18 @@ export class SolarSystemLayer implements ScaleLayer {
     meanAnomalyJ2000: number; 
     meanMotion: number;
     approachRadius: number;
+    worldPos: THREE.Vector3;
     moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
   private scene: THREE.Scene;
+  private camera: CosmoCamera;
   private daysSinceJ2000 = 0;
   private isInitialized = false;
-  private api: FrameApi | null = null;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, camera: CosmoCamera) {
     this.scene = scene;
+    this.camera = camera;
     this.container = new THREE.Group();
     this.container.name = 'SolarSystemLayer';
 
@@ -106,11 +108,11 @@ export class SolarSystemLayer implements ScaleLayer {
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
 
-    // Ambient light so dark sides aren't pitch black, plus bright point light at the Sun
-    const ambientLight = new THREE.AmbientLight(0x333333);
+    // Ambient light + zero-decay point light for outer planets like Saturn
+    const ambientLight = new THREE.AmbientLight(0x555555);
     this.container.add(ambientLight);
 
-    const sunLight = new THREE.PointLight(0xffffff, 2.5, 100);
+    const sunLight = new THREE.PointLight(0xffffff, 3.0, 0, 0);
     this.container.add(sunLight);
 
     const catalogEntries: CatalogEntry[] = [];
@@ -123,10 +125,9 @@ export class SolarSystemLayer implements ScaleLayer {
       const auRadius = Math.max(data.radius * 0.002, 0.025);
 
       const planetGeo = new THREE.SphereGeometry(auRadius, 24, 24);
-      // Use MeshStandardMaterial with proper roughness/metalness and light responsiveness
       const planetMat = new THREE.MeshStandardMaterial({ 
         color: data.color,
-        roughness: 0.7,
+        roughness: 0.6,
         metalness: 0.1
       });
       const planetMesh = new THREE.Mesh(planetGeo, planetMat);
@@ -188,6 +189,7 @@ export class SolarSystemLayer implements ScaleLayer {
         meanAnomalyJ2000: data.meanAnomalyJ2000,
         meanMotion: data.meanMotion,
         approachRadius: auRadius * 3.0,
+        worldPos: new THREE.Vector3(auDist, 0, 0),
         moons: moonEntries
       });
     });
@@ -195,21 +197,21 @@ export class SolarSystemLayer implements ScaleLayer {
     register(catalogEntries);
   }
 
-  public enter(api: FrameApi): void {
-    this.api = api;
+  public enter(_api: FrameApi): void {
     if (!this.container.parent) {
       this.scene.add(this.container);
     }
   }
 
   public update(dt: number): void {
-    // Freeze time during camera flight/transition to prevent orbital drift on arrival
-    const isTransitioning = this.api?.isTransitioning ?? false;
-    const timeScale = isTransitioning ? 0.0 : 1.0; 
-    this.daysSinceJ2000 += dt * 5.0 * timeScale;
+    // 1x real-time progression prevents orbital drift during camera flights
+    const timeScale = 1.0; 
+    this.daysSinceJ2000 += dt * timeScale;
 
     if (this.sunMesh) {
       this.sunMesh.rotation.y += dt * 0.05 * timeScale;
+      const sunRel = toCameraRelative(ORIGIN, this.camera.position, layerScale('helio'));
+      this.sunMesh.position.copy(sunRel);
     }
 
     this.planetMeshes.forEach((item) => {
@@ -223,8 +225,10 @@ export class SolarSystemLayer implements ScaleLayer {
       const xAU = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
       const zAU = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
 
-      item.mesh.position.x = xAU;
-      item.mesh.position.z = zAU;
+      item.worldPos.set(xAU, 0, zAU);
+
+      const relPos = toCameraRelative(item.worldPos, this.camera.position, layerScale('helio'));
+      item.mesh.position.copy(relPos);
       item.mesh.rotation.y += dt * 0.5 * timeScale;
 
       if (item.moons) {
@@ -236,25 +240,13 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public resolveTarget(id: string) {
-    const planetIndex = PLANETS.findIndex(p => p.id === id);
-    if (planetIndex !== -1) {
-      const data = PLANETS[planetIndex];
-      const M = (data.meanAnomalyJ2000 + data.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
-      let E = M;
-      for (let iter = 0; iter < 3; iter++) {
-        E = M + data.eccentricity * Math.sin(E);
-      }
-      const xAU = data.semiMajorAxis * (Math.cos(E) - data.eccentricity);
-      const zAU = data.semiMajorAxis * Math.sqrt(1 - data.eccentricity * data.eccentricity) * Math.sin(E);
-
-      const worldPos = new Float64Array([xAU, 0, zAU]);
-      const foundMesh = this.planetMeshes.find(p => p.mesh.name === id);
-      const approachRadius = foundMesh ? foundMesh.approachRadius : 0.1;
-
+    const found = this.planetMeshes.find(p => p.mesh.name === id);
+    if (found) {
+      const worldPos = new Float64Array([found.worldPos.x, found.worldPos.y, found.worldPos.z]);
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius
+        approachRadius: found.approachRadius
       };
     }
 
@@ -274,7 +266,5 @@ export class SolarSystemLayer implements ScaleLayer {
     if (this.container.parent) {
       this.container.parent.remove(this.container);
     }
-    this.api = null;
   }
 }
-
