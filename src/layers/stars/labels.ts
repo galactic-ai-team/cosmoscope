@@ -48,7 +48,7 @@ export class StellarLabels {
   private readonly occupied: Rect[] = [];
 
   private readonly exclusions: Rect[] = Array.from(
-    { length: 8 },
+    { length: StellarLabels.EXCLUSION_IDS.length },
     () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
   );
 
