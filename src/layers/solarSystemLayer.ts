@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
-import { FrameApi, CosmoCamera } from '../core/camera';
+import { FrameApi, CosmoCamera, FramedPoint } from '../core/camera';
 import { FrameId } from '../core/frames';
+import { METERS } from '../core/units';
 import { register, CatalogEntry } from '../catalog';
 
 interface PlanetData {
@@ -60,6 +61,7 @@ const PLANETS: PlanetData[] = [
 
 export class SolarSystemLayer implements ScaleLayer {
   public static readonly ORIGIN = new Float64Array([0, 0, 0]);
+  private static readonly SUN: FramedPoint = { frame: 'helio', position: [0, 0, 0] };
 
   public idPrefix = 'planet';
   public frames: FrameId[] = ['helio'];
@@ -96,7 +98,6 @@ export class SolarSystemLayer implements ScaleLayer {
     this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
 
     this.buildSolarSystem();
-    // Initialize positions immediately so resolveTarget has fresh coords on startup
     this.placePlanets(this.daysSinceJ2000, 0);
   }
 
@@ -147,7 +148,7 @@ export class SolarSystemLayer implements ScaleLayer {
         id: data.id,
         name: data.name,
         kind: 'planet',
-        distanceM: data.semiMajorAxis * 1.496e11,
+        distanceM: data.semiMajorAxis * METERS.au,
         blurb: `${data.name} is a planet in our Solar System.`
       });
 
@@ -188,7 +189,7 @@ export class SolarSystemLayer implements ScaleLayer {
             id: moonData.id,
             name: moonData.name,
             kind: 'planet',
-            distanceM: (data.semiMajorAxis * 1.496e11) + (moonData.distance * 1.496e11),
+            distanceM: (data.semiMajorAxis * METERS.au) + (moonData.distance * METERS.au),
             blurb: `Natural satellite of ${data.name}.`
           });
 
@@ -247,7 +248,7 @@ export class SolarSystemLayer implements ScaleLayer {
     }
   }
 
-  public update(dt: number, distance: number): void {
+  public update(dt: number, _distance: number): void {
     const timeScale = 500.0;
     this.daysSinceJ2000 += (dt / 86400) * timeScale;
 
@@ -258,10 +259,11 @@ export class SolarSystemLayer implements ScaleLayer {
     // Update positions via placePlanets
     this.placePlanets(this.daysSinceJ2000, dt);
 
-    // Fade out smoothly as camera zooms past outer planets (35 AU -> 120 AU) towards stars
+    // Sun-anchored distance in AU for smooth fade out (35 AU -> 120 AU)
+    const sunDistanceAU = this.camera.getFocusDistance(SolarSystemLayer.SUN) / METERS.au;
     const fadeStart = 35.0;
     const fadeEnd = 120.0;
-    const alpha = 1.0 - THREE.MathUtils.smoothstep(distance, fadeStart, fadeEnd);
+    const alpha = 1.0 - THREE.MathUtils.smoothstep(sunDistanceAU, fadeStart, fadeEnd);
 
     if (this.sunMaterial) {
       this.sunMaterial.opacity = alpha;
@@ -282,11 +284,10 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public lodLevel(): number {
-    return this.camera.getCameraDistanceToOrigin();
+    return this.camera.getFocusDistance(SolarSystemLayer.SUN) / METERS.au;
   }
 
   public resolveTarget(id: string) {
-    // Ensure positions are fully up-to-date even when called from non-helio frames
     this.placePlanets(this.daysSinceJ2000, 0);
 
     const found = this.planetMeshes.find(p => p.mesh.name === id);
@@ -317,3 +318,4 @@ export class SolarSystemLayer implements ScaleLayer {
     }
   }
 }
+
