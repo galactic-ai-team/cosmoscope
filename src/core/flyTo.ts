@@ -13,7 +13,7 @@
 
 import type { FrameApi } from './camera';
 import type { FrameId } from './frames';
-import type { LayerRegistry, ResolvedTarget } from './layers';
+import type { LayerRegistry } from './layers';
 
 export type TargetKind = 'planet' | 'star' | 'galaxy' | 'cluster';
 export type Approach = 'orbit' | 'surface' | 'flyby';

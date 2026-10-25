@@ -77,6 +77,21 @@ describe('FrameApi additions for flyTo', () => {
     expect(after.distanceTo(before) / before.length()).toBeLessThan(1e-9);
   });
 
+  it('lookAt sets the target (own frame by default, or another frame) and updates renderScale', () => {
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setPose({ frame: 'galactic', position: [0, 0, 0] });
+    cam.lookAt(new Float64Array([0, 5, 0]));
+    cam.update();
+    expect(cam.three.getWorldDirection(new THREE.Vector3()).y).toBeCloseTo(1, 6);
+    expect(cam.getTarget()?.frame).toBe('galactic');
+    const dir = new THREE.Vector3();
+    cam.lookAt([16.5, 0, 0], 'cosmic'); // Virgo-ish, in Mpc
+    cam.update();
+    expect(cam.getTarget()?.frame).toBe('cosmic');
+    expect(cam.three.getWorldDirection(dir).x).toBeCloseTo(1, 6);
+    expect(cam.renderScale).toBe(1e23); // 16.5 Mpc ~ 5.1e23 m
+  });
+
   it('getCameraDistanceToOrigin is meters to the current frame origin', () => {
     const cam = new CosmoCamera(new FrameStack());
     cam.setPose({ frame: 'helio', position: [3, 4, 0] });

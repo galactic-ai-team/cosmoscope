@@ -19,7 +19,6 @@
 import * as THREE from 'three';
 
 import type { FrameApi, CosmoCamera } from '../core/camera';
-import type { FrameId } from '../core/frames';
 import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import { register, type CatalogEntry } from '../catalog';
 

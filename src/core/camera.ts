@@ -55,6 +55,7 @@ export interface FrameApi {
   getCameraDistanceToOrigin(): number;
   unitsPerFrame(frameId: FrameId): number;
   setPose(pose: Pose): void;
+  lookAt(point: Vec3Like, frameId?: FrameId): void;
   distanceTo(point: FramedPoint): number;
   onRebase(listener: RebaseListener): () => void;
 }
@@ -138,6 +139,16 @@ export class CosmoCamera implements FrameApi {
     this.refreshScale();
   }
 
+  /**
+   * Aim at a point; `point` is in `frameId` units (default: the camera's own
+   * frame). Sets the target, so renderScale follows the new focus distance.
+   * Cheap and allocation-free; safe to call every frame.
+   */
+  lookAt(point: Vec3Like, frameId: FrameId = this.frameId): void {
+    this.targetFrame = frameId;
+    copy3(point, this.targetPos);
+    this.refreshScale();
+  }
   getTarget(out: Float64Array = new Float64Array(3)): FramedPoint | null {
     if (this.targetFrame === null) return null;
     copy3(this.targetPos, out);
