@@ -14,7 +14,9 @@ const KINDS: readonly TargetKind[] = ['planet', 'star', 'galaxy'];
 
 /** Infer the target kind from an id prefix, or null if the prefix is unknown. */
 export function kindFromId(id: string): TargetKind | null {
-  const k = id.slice(0, id.indexOf(':')) as TargetKind;
+  const idx = id.indexOf(':');
+  if (idx <= 0) return null;
+  const k = id.slice(0, idx) as TargetKind;
   return KINDS.includes(k) ? k : null;
 }
 
@@ -36,6 +38,7 @@ export function linkSearchToFlight(
     const kind = kindFromId(id);
     if (!kind) { onError(id, new Error(`No layer kind for id: ${id}`)); return; }
     current?.cancel();
+    // Tag this pick; only the latest pick's handlers fire.
     const mine = ++seq;
     const h = flyer.flyTo({ kind, id, approach: 'orbit' }, now());
     current = h;
