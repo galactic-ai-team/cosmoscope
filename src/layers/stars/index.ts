@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import type { FrameId } from '../../core/frames';
 import type { CosmoCamera, FrameApi } from '../../core/camera';
 import type { ScaleLayer, ResolvedTarget } from '../../core/layers';
+import { StellarConstellations } from './constellations';
 import {
   loadHygStars,
   PARSEC_METRES,
@@ -119,6 +120,7 @@ export class StellarNeighborhood implements ScaleLayer {
   private readonly camera: CosmoCamera;
 
   private readonly labels: StellarLabels;
+  private readonly constellations: StellarConstellations;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -128,6 +130,8 @@ export class StellarNeighborhood implements ScaleLayer {
     this.labels = new StellarLabels(camera);
     this.object3D.add(this.labels.object3D);
     this.object3D.name = 'gpt6-stellar-neighborhood';
+    this.constellations = new StellarConstellations(camera);
+    this.object3D.add(this.constellations.object3D);
   }
 
   /**
@@ -141,6 +145,7 @@ export class StellarNeighborhood implements ScaleLayer {
       .then((rows) => {
         this.rows = rows;
         this.labels.build(rows);
+        this.constellations.build(rows);
 
         for (let i = 0; i < rows.length; i++) {
           this.byId.set(`star:hyg:${rows[i][0]}`, i);
@@ -226,6 +231,7 @@ export class StellarNeighborhood implements ScaleLayer {
     pts.material.uniforms.uOpacity.value = fade;
 
     this.labels.update(distLy, fade);
+    this.constellations.update(distLy, fade);
 
     if (fade <= 0) {
       pts.visible = false;
@@ -285,6 +291,7 @@ export class StellarNeighborhood implements ScaleLayer {
   dispose(): void {
     this.exit();
     this.labels.dispose();
+    this.constellations.dispose();
 
     this.mesh?.geometry.dispose();
     this.mesh?.material.dispose();
