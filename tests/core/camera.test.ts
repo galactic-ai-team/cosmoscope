@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 
-import { chooseRenderScale, CosmoCamera, MIN_RENDER_SCALE } from '../../src/core/camera';
+import { chooseRenderScale, CosmoCamera, MIN_RENDER_SCALE, type FrameApi } from '../../src/core/camera';
 import { FrameStack, METERS, type FrameId } from '../../src/core/frames';
 
 const PIXEL_RAD = ((50 * Math.PI) / 180) / 1080; // 1 px at 1080p, 50 deg fov
@@ -90,6 +90,16 @@ describe('FrameApi additions for flyTo', () => {
     expect(cam.getTarget()?.frame).toBe('cosmic');
     expect(cam.three.getWorldDirection(dir).x).toBeCloseTo(1, 6);
     expect(cam.renderScale).toBe(1e23); // 16.5 Mpc ~ 5.1e23 m
+  });
+
+  it('toFrame converts points between frames through the FrameApi', () => {
+    const frames = new FrameStack();
+    frames.setOrigin('planet', [METERS.au, 0, 0]);
+    const api: FrameApi = new CosmoCamera(frames);
+    const out = new Float64Array(3);
+    expect(api.toFrame([0, 0, 0], 'planet', 'helio', out)).toBe(out); // frame offset
+    expect(out[0]).toBeCloseTo(1, 12);
+    expect(api.toFrame([1, 0, 0], 'galactic', 'helio')[0]).toBeCloseTo(206264.806, 3);
   });
 
   it('getCameraDistanceToOrigin is meters to the current frame origin', () => {
