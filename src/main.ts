@@ -17,6 +17,7 @@ import { createStubOrbitLayer, createStubPlanetLayer, type StubLayer } from './c
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
+import { makeZoneHud } from './ui/zone';
 import { linkSearchToFlight, type Flyer } from './ui/flyLink';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
@@ -143,6 +144,8 @@ addEventListener('resize', () => {
 // ---- render loop (main.ts owns it) --------------------------------------------
 const scaleEl = document.querySelector<HTMLElement>('#scale');
 const hudTarget = new Float64Array(3);
+const zoneHud = makeZoneHud(document.querySelector<HTMLElement>('#zone'));
+const SUN_POINT = { frame: 'galactic' as FrameId, position: SUN };
 let last = -1;
 renderer.setAnimationLoop((ms: number) => {
   now = ms / 1000;
@@ -157,5 +160,6 @@ renderer.setAnimationLoop((ms: number) => {
     const tgt = camera.getTarget(hudTarget);
     scaleEl.textContent = tgt ? `Distance to target: ${formatDistance(camera.distanceTo(tgt))}` : '';
   }
+  zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
   renderer.render(scene, camera.three);
 });
