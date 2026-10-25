@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
 import { FrameApi, CosmoCamera, FramedPoint } from '../core/camera';
 import { FrameId } from '../core/frames';
-import { METERS } from '../core/units';
+import { METERS } from '../core/frames';
 import { register, CatalogEntry } from '../catalog';
 
 interface PlanetData {
