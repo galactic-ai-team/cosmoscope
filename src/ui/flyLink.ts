@@ -7,7 +7,7 @@ export type Approach = 'orbit' | 'surface' | 'flyby';
 
 /** Structural match for Dee's FlyToController.flyTo (src/core/flyTo.ts). */
 export interface Flyer {
-  flyTo(t: { kind: TargetKind; id: string; approach: Approach }): { promise: Promise<void>; cancel(): void };
+  flyTo(t: { kind: TargetKind; id: string; approach: Approach }, now?: number): { promise: Promise<void>; cancel(): void };
 }
 
 const KINDS: readonly TargetKind[] = ['planet', 'star', 'galaxy'];
@@ -27,6 +27,8 @@ export function linkSearchToFlight(
   flyer: Flyer,
   onArrive: (id: string) => void,
   onError: (id: string, err: unknown) => void = (id, err) => console.warn('flyTo failed', id, err),
+  /** Loop clock in seconds (main.ts owns the loop); keeps flights on the same time base as update(dt). */
+  now: () => number = () => performance.now() / 1000,
 ): (id: string) => void {
   let current: { cancel(): void } | null = null;
   let seq = 0;
@@ -35,7 +37,7 @@ export function linkSearchToFlight(
     if (!kind) { onError(id, new Error(`No layer kind for id: ${id}`)); return; }
     current?.cancel();
     const mine = ++seq;
-    const h = flyer.flyTo({ kind, id, approach: 'orbit' });
+    const h = flyer.flyTo({ kind, id, approach: 'orbit' }, now());
     current = h;
     h.promise.then(
       () => { if (mine === seq) onArrive(id); },
