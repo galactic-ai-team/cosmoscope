@@ -51,6 +51,39 @@ describe('CosmoCamera pose and getters', () => {
   });
 });
 
+describe('FrameApi additions for flyTo', () => {
+  it('setCameraFrameAndPosition switches frame and position together', () => {
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setCameraFrameAndPosition('galactic', [1, 2, 3]);
+    expect(cam.getFrameId()).toBe('galactic');
+    expect(Array.from(cam.getCameraWorldPosition())).toEqual([1, 2, 3]);
+  });
+
+  it('rebaseTo changes frame without moving anything on screen', () => {
+    const frames = new FrameStack();
+    frames.setOrigin('planet', [METERS.au, 0, 0]);
+    const cam = new CosmoCamera(frames);
+    const target = { frame: 'planet' as const, position: [6371, 0, 0] };
+    cam.setPose({ frame: 'helio', position: [1, 1e-4, 0], target });
+    cam.update();
+    const before = cam.toCameraRelative(target.position, 'planet', new THREE.Vector3());
+    const events: string[] = [];
+    cam.onRebase((e) => events.push(e.reason));
+    cam.rebaseTo('planet');
+    cam.update();
+    const after = cam.toCameraRelative(target.position, 'planet', new THREE.Vector3());
+    expect(cam.getFrameId()).toBe('planet');
+    expect(events).toEqual(['frame']);
+    expect(after.distanceTo(before) / before.length()).toBeLessThan(1e-9);
+  });
+
+  it('getCameraDistanceToOrigin is meters to the current frame origin', () => {
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setPose({ frame: 'helio', position: [3, 4, 0] });
+    expect(cam.getCameraDistanceToOrigin()).toBeCloseTo(5 * METERS.au, -3);
+  });
+});
+
 describe('renderScale and rebase events', () => {
   it('chooses a power of ten with hysteresis', () => {
     expect(chooseRenderScale(3e9, 1)).toBe(1e9);

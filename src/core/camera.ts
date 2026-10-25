@@ -42,6 +42,23 @@ export interface RebaseEvent {
 }
 export type RebaseListener = (e: RebaseEvent) => void;
 
+/**
+ * The camera surface other lanes code against (flyTo, registry). Import this
+ * type instead of redeclaring it, so the two sides can't drift apart.
+ */
+export interface FrameApi {
+  getFrameId(): FrameId;
+  getCameraWorldPosition(frameId?: FrameId, out?: Float64Array): Float64Array;
+  setCameraWorldPosition(pos: Vec3Like, frameId?: FrameId): void;
+  setCameraFrameAndPosition(frameId: FrameId, pos: Vec3Like): void;
+  rebaseTo(frameId: FrameId): void;
+  getCameraDistanceToOrigin(): number;
+  unitsPerFrame(frameId: FrameId): number;
+  setPose(pose: Pose): void;
+  distanceTo(point: FramedPoint): number;
+  onRebase(listener: RebaseListener): () => void;
+}
+
 export interface FramedPoint {
   frame: FrameId;
   position: Vec3Like;
@@ -70,7 +87,7 @@ export function chooseRenderScale(distanceMeters: number, current: number): numb
   return Math.max(MIN_RENDER_SCALE, 10 ** Math.floor(Math.log10(d)));
 }
 
-export class CosmoCamera {
+export class CosmoCamera implements FrameApi {
   readonly three: THREE.PerspectiveCamera;
 
   private frameId: FrameId;
@@ -147,6 +164,29 @@ export class CosmoCamera {
   /** Meters per unit of a frame. */
   unitsPerFrame(frameId: FrameId): number {
     return this.frames.unitsPerFrame(frameId);
+  }
+
+  /**
+   * Switch frames and set position in one call; `pos` is in `frameId` units.
+   * Same as setPose({ frame, position }) with target and up unchanged.
+   */
+  setCameraFrameAndPosition(frameId: FrameId, pos: Vec3Like): void {
+    this.setPose({ frame: frameId, position: pos });
+  }
+
+  /**
+   * Re-express the camera in another frame without moving it. Exact, so
+   * nothing on screen changes; no interpolation needed or wanted.
+   */
+  rebaseTo(frameId: FrameId): void {
+    if (frameId === this.frameId) return;
+    this.frames.toFrame(this.pos, this.frameId, frameId, this.s64);
+    this.setPose({ frame: frameId, position: this.s64 });
+  }
+
+  /** Meters from the camera to the origin of the camera's CURRENT frame. */
+  getCameraDistanceToOrigin(): number {
+    return Math.hypot(this.pos[0], this.pos[1], this.pos[2]) * this.frames.unitsPerFrame(this.frameId);
   }
 
   // ---- rendering ----------------------------------------------------------
