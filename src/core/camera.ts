@@ -53,6 +53,7 @@ export interface FrameApi {
   setCameraFrameAndPosition(frameId: FrameId, pos: Vec3Like): void;
   rebaseTo(frameId: FrameId): void;
   getCameraDistanceToOrigin(): number;
+  getFocusDistance(anchor?: FramedPoint): number;
   unitsPerFrame(frameId: FrameId): number;
   toFrame(point: Vec3Like, from: FrameId, to: FrameId, out?: Float64Array): Float64Array;
   setPose(pose: Pose): void;
@@ -243,6 +244,23 @@ export class CosmoCamera implements FrameApi {
   /** Meters from the camera to the origin of the camera's CURRENT frame. */
   getCameraDistanceToOrigin(): number {
     return Math.hypot(this.pos[0], this.pos[1], this.pos[2]) * this.frames.unitsPerFrame(this.frameId);
+  }
+
+  /**
+   * The one distance basis for LOD, in meters.
+   *   - With `anchor` (a bounded layer: a planet, a galaxy): camera -> anchor.
+   *   - Without (a layer that surrounds the camera: stars, cosmic web):
+   *     camera -> current target, i.e. the scale the user is looking at.
+   *   - No anchor and no target yet: camera -> its frame's origin.
+   * Allocation-free.
+   */
+  getFocusDistance(anchor?: FramedPoint): number {
+    if (anchor) return this.distanceTo(anchor);
+    if (this.targetFrame !== null) {
+      const rel = this.relative(this.targetPos, this.targetFrame, this.s64);
+      return Math.hypot(rel[0], rel[1], rel[2]) * this.frames.unitsPerFrame(this.frameId);
+    }
+    return this.getCameraDistanceToOrigin();
   }
 
   // ---- rendering ----------------------------------------------------------
