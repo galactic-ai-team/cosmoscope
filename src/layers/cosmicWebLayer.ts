@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
 import { CosmoCamera } from '../core/camera';
 import { FrameId } from '../core/frames';
+import { METERS } from '../core/frames';
 import { register, CatalogEntry } from '../catalog';
 
 interface CosmicGalaxyPoint {
@@ -20,9 +21,9 @@ interface CosmicWebData {
 export class CosmicWebLayer implements ScaleLayer {
   public static readonly ORIGIN = new Float64Array([0, 0, 0]);
 
-  public idPrefix = 'galaxy'; // or custom prefix matching cosmic catalog ids
+  public idPrefix = 'cosmicweb';
   public frames: FrameId[] = ['cosmic'];
-  public minZoom = 1e22; // Visible at cosmological scale (~10^22 - 10^26 meters)
+  public minZoom = 1e22;
   public maxZoom = 1e27;
   public renderBudget = 25;
 
@@ -31,7 +32,7 @@ export class CosmicWebLayer implements ScaleLayer {
   private container: THREE.Group;
   private pointsMesh: THREE.Points | null = null;
   private pointsMaterial: THREE.PointsMaterial | null = null;
-  private isLoaded = false;
+  private galaxyPoints: CosmicGalaxyPoint[] = [];
 
   constructor(scene: THREE.Scene, camera: CosmoCamera) {
     this.scene = scene;
@@ -47,8 +48,8 @@ export class CosmicWebLayer implements ScaleLayer {
         throw new Error(`Failed to load cosmic web data: ${response.statusText}`);
       }
       const data: CosmicWebData = await response.json();
+      this.galaxyPoints = data.points;
       this.buildCosmicWeb(data.points);
-      this.isLoaded = true;
       return data.points.length;
     } catch (err) {
       console.warn('CosmicWebLayer: data unavailable or failed to load', err);
@@ -62,7 +63,6 @@ export class CosmicWebLayer implements ScaleLayer {
     const catalogEntries: CatalogEntry[] = [];
 
     pointsData.forEach((pt, i) => {
-      // 1 Mpc in cosmic scale coordinates
       const x = pt.xyz[0];
       const y = pt.xyz[1];
       const z = pt.xyz[2];
@@ -71,18 +71,19 @@ export class CosmicWebLayer implements ScaleLayer {
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
 
+      const distMpc = Math.sqrt(x * x + y * y + z * z);
+
       catalogEntries.push({
-        id: pt.id || `galaxy:2mrs:${i}`,
+        id: pt.id || `cosmicweb:2mrs:${i}`,
         name: pt.name || `2MRS Galaxy ${i}`,
         kind: 'galaxy',
-        distanceM: x * 3.086e22, // Convert Mpc to meters
+        distanceM: distMpc * METERS.mpc,
         blurb: `2MRS Galaxy with K-band magnitude ${pt.mk}, redshift z=${pt.z}.`
       });
     });
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-    // Points material with glowing additive blending and magnitude-responsive feel
     this.pointsMaterial = new THREE.PointsMaterial({
       color: 0x88ccff,
       size: 1.8,
@@ -105,15 +106,20 @@ export class CosmicWebLayer implements ScaleLayer {
     }
   }
 
-  public update(_dt: number, distance: number): void {
+  public update(_dt: number, distanceMeters: number): void {
+    if (!this.pointsMesh) return;
+
     // Camera-relative positioning for floating-origin precision in 'cosmic' frame
     this.camera.toCameraRelative(CosmicWebLayer.ORIGIN, 'cosmic', this.container.position);
     this.container.scale.setScalar(this.camera.layerScale('cosmic'));
 
-    // Fade in past ~1 Mpc out to 100+ Mpc cosmological distance
-    const fadeStart = 1.0; // Mpc
-    const fadeEnd = 50.0;  // Mpc
-    const alpha = THREE.MathUtils.smoothstep(distance, fadeStart, fadeEnd);
+    // Convert distance from meters to Mpc for correct fade threshold calculations
+    const distanceMpc = distanceMeters / METERS.mpc;
+
+    // Fade in past ~1 Mpc out to 50 Mpc cosmological distance
+    const fadeStart = 1.0;
+    const fadeEnd = 50.0;
+    const alpha = THREE.MathUtils.smoothstep(distanceMpc, fadeStart, fadeEnd);
 
     if (this.pointsMaterial) {
       this.pointsMaterial.opacity = alpha * 0.85;
@@ -121,15 +127,22 @@ export class CosmicWebLayer implements ScaleLayer {
   }
 
   public lodLevel(): number {
-    return this.camera.getCameraDistanceToOrigin();
+    // Return discrete tier index based on camera distance in Mpc
+    const distMpc = this.camera.getCameraDistanceToOrigin() / METERS.mpc;
+    if (distMpc < 10) return 0;
+    if (distMpc < 100) return 1;
+    return 2;
   }
 
-  public resolveTarget(_id: string) {
-    // Basic target resolution for 2MRS galaxies if searched
+  public resolveTarget(id: string) {
+    const found = this.galaxyPoints.find(pt => pt.id === id || `cosmicweb:2mrs:${this.galaxyPoints.indexOf(pt)}` === id);
+    if (!found) return null;
+
+    const worldPos = new Float64Array([found.xyz[0], found.xyz[1], found.xyz[2]]);
     return {
       frameId: 'cosmic' as FrameId,
-      worldPos: new Float64Array([0, 0, 0]),
-      approachRadius: 5.0
+      worldPos,
+      approachRadius: 2.5
     };
   }
 
@@ -143,3 +156,4 @@ export class CosmicWebLayer implements ScaleLayer {
 export function createCosmicWebLayer(scene: THREE.Scene, camera: CosmoCamera): CosmicWebLayer {
   return new CosmicWebLayer(scene, camera);
 }
+
