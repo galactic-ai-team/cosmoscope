@@ -25,7 +25,8 @@ export function showInfo(e: CatalogEntry): void {
   box.hidden = false;
 }
 
-export function mountSearch(onPick: (id: string) => void): void {
+/** showInfoOnPick=false lets the flight bridge open the panel on arrival instead. */
+export function mountSearch(onPick: (id: string) => void, showInfoOnPick = true): void {
   const input = document.querySelector<HTMLInputElement>('#search input')!;
   const list = document.querySelector<HTMLUListElement>('#search ul')!;
   const info = document.querySelector<HTMLElement>('#info')!;
@@ -48,7 +49,7 @@ export function mountSearch(onPick: (id: string) => void): void {
     const r = results[i];
     if (!r) return;
     input.value = r.name; results = []; render(); input.blur();
-    const e = get(r.id); if (e) showInfo(e);
+    if (showInfoOnPick) { const e = get(r.id); if (e) showInfo(e); }
     onPick(r.id);
   };
   input.addEventListener('input', () => { results = search(input.value); sel = 0; render(); });
@@ -62,3 +63,6 @@ export function mountSearch(onPick: (id: string) => void): void {
     if (ev.key === '/' && document.activeElement !== input) { ev.preventDefault(); input.focus(); }
   });
 }
+
+/** Show the info panel for a catalog id (no-op if unknown). */
+export function showInfoById(id: string): void { const e = get(id); if (e) showInfo(e); }
