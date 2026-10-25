@@ -3,8 +3,7 @@
 // Consumed by LayerRegistry (layers.ts) — computes a LodState per layer each
 // frame and hands it to ScaleLayer.update() as an optional 4th argument.
 
-import type { FrameApi } from './camera';
-import type { FramedPoint } from './frames';
+import type { FrameApi, FramedPoint } from './camera';
 
 export interface LodTier {
   /** Max distance (metres) at which this tier is eligible to draw. */
@@ -14,20 +13,21 @@ export interface LodTier {
   /** Ratio of maxDistance over which to fade in. Default 0.15. */
   crossfadeRatio?: number;
   /**
-   * Anchor to measure distance from for this tier. If omitted, uses the
-   * layer's defaultAnchor. If that's also omitted, uses camera focus.
-   * Per-tier override lets a layer mix anchors (e.g. stars: Sun-anchored
-   * coarse tiers, focus-anchored near tier for labels/detail).
+   * Distance basis for this tier:
+   *  - FramedPoint      : explicit anchor (e.g. Sun, a specific galaxy)
+   *  - 'camera-focus'   : Claude's camera.getTargetPosition / frame-origin fallback
+   *  - undefined        : inherit layer.defaultAnchor, else 'camera-focus'
+   * Per-tier override is what allows a star layer to mix Sun-anchored coarse
+   * tiers with camera-focus near tier (for labels/detail).
    */
-  anchor?: FramedPoint;
+  anchor?: FramedPoint | 'camera-focus';
 }
 
 /**
- * Read-only LOD snapshot for the current frame, one reused record per layer.
+ * Read-only LOD snapshot, one reused record per layer across frames.
  *
- * IMPORTANT: the registry reuses one LodState object per layer across frames
- * and mutates it in place. Do NOT retain the reference across frames. If you
- * need to compare against last frame, copy the fields you care about.
+ * IMPORTANT: the registry mutates this in place. Do NOT retain the reference
+ * across frames. Copy fields you need to compare against.
  */
 export interface LodState {
   /** Active tier index (0 = nearest), or -1 if the layer is LOD-inactive. */
@@ -39,11 +39,9 @@ export interface LodState {
   /** Distance (metres) used for tier selection this frame. */
   readonly focusDistance: number;
   /**
-   * Which anchor produced focusDistance. "tier" = tier's own anchor,
-   * "layer-default" = layer.defaultAnchor, "camera-focus" = FocusApi.getFocusDistance(),
-   * "frame-origin" = fallback. null only when level === -1 (LOD-inactive).
+   * Which anchor produced focusDistance. null when level === -1 (LOD-inactive).
    */
-  readonly focusId: 'tier' | 'layer-default' | 'camera-focus' | 'frame-origin' | null;
+  readonly focusId: 'tier' | 'layer-default' | 'camera-focus' | null;
   /** Whether hysteresis held the level at its previous value this frame. */
   readonly heldByHysteresis: boolean;
 }
@@ -98,48 +96,44 @@ export function validateLodTiers(tiers: LodTier[], idPrefix: string): void {
         `Layer "${idPrefix}": lodTiers[${i}].crossfadeRatio must be in (0,1) (${cr})`,
       );
     }
+    const a = t.anchor;
+    if (a !== undefined && a !== 'camera-focus') {
+      if (
+        typeof a !== 'object' ||
+        a === null ||
+        !('frame' in a) ||
+        !('point' in a) ||
+        !(a.point instanceof Float64Array) ||
+        a.point.length !== 3
+      ) {
+        throw new Error(
+          `Layer "${idPrefix}": lodTiers[${i}].anchor must be a FramedPoint or 'camera-focus'`,
+        );
+      }
+    }
   }
 }
 
 /**
- * Compute the tier selection for a layer given its current distance.
- * Respects hysteresis: to move UP (nearer, higher detail), distance must be
- * <= tier.maxDistance; to move DOWN (farther, lower detail), distance must
- * exceed tier.maxDistance * HYSTERESIS_RATIO.
- *
- * `currentLevel` is the layer's level from last frame (-1 = inactive).
- * Returns the new level (-1 = inactive) and whether hysteresis held.
+ * Distance for a given tier, honoring per-tier anchor override.
+ * Precedence: tier.anchor (FramedPoint) > tier.anchor === 'camera-focus' >
+ *             layer.defaultAnchor > camera focus fallback.
  */
-export function selectTier(
-  tiers: LodTier[],
-  distance: number,
-  currentLevel: number,
-): { level: number; heldByHysteresis: boolean } {
-  // Find the highest-detail tier whose maxDistance >= distance, honoring
-  // hysteresis against the current level.
-  const prevLevel = currentLevel;
-  const prevMax =
-    prevLevel >= 0 && prevLevel < tiers.length
-      ? tiers[prevLevel].maxDistance
-      : Infinity;
-
-  // If currently active and distance is within the hysteresis band above
-  // prevMax (i.e. prevMax < distance <= prevMax * HYSTERESIS_RATIO), hold.
-  if (prevLevel >= 0 && distance > prevMax && distance <= prevMax * HYSTERESIS_RATIO) {
-    return { level: prevLevel, heldByHysteresis: true };
-  }
-
-  // Otherwise, find the highest-detail tier whose maxDistance >= distance.
-  // Tiers are ascending by maxDistance, so iterate from 0 upward and take
-  // the first one whose maxDistance >= distance. Distance <= tiers[0].maxDistance
-  // selects level 0; distance in (tiers[i-1].maxDistance, tiers[i].maxDistance]
-  // selects level i; distance > tiers[last].maxDistance selects -1 (inactive).
-  for (let i = 0; i < tiers.length; i++) {
-    if (distance <= tiers[i].maxDistance) {
-      return { level: i, heldByHysteresis: false };
+export function resolveTierDistance(
+  tier: LodTier,
+  layerDefaultAnchor: FramedPoint | undefined,
+  api: FrameApi,
+): { distance: number; focusId: LodState['focusId'] } {
+  if (tier.anchor !== undefined) {
+    if (tier.anchor === 'camera-focus') {
+      return { distance: api.getFocusDistance(), focusId: 'camera-focus' };
     }
+    return { distance: api.getFocusDistance(tier.anchor), focusId: 'tier' };
   }
-  return { level: -1, heldByHysteresis: false };
+  if (layerDefaultAnchor) {
+    return { distance: api.getFocusDistance(layerDefaultAnchor), focusId: 'layer-default' };
+  }
+  return { distance: api.getFocusDistance(), focusId: 'camera-focus' };
 }
 
 /** Compute crossfade opacity for a given level and distance. */
@@ -151,21 +145,78 @@ export function computeCrossfade(tier: LodTier, distance: number): number {
   return (tier.maxDistance - distance) / fadeInDist;
 }
 
-/** Resolve the focusDistance for a tier given the layer and API. */
-export function resolveTierDistance(
-  tier: LodTier,
+/**
+ * Select the tier whose anchor-distance puts us inside its maxDistance.
+ * Because each tier can use a different anchor, we must evaluate EVERY tier's
+ * own distance to decide eligibility — not compare raw camera distance to
+ * maxDistance. Selection rule: the highest-detail (lowest-index) tier whose
+ * anchor-distance <= its maxDistance. Hysteresis applies to the previously
+ * selected tier: if the previous tier would still be eligible but we've moved
+ * to a farther eligible tier's band, we honor the previous tier until we exit
+ * HYSTERESIS_RATIO * its maxDistance.
+ */
+export function selectTier(
+  tiers: LodTier[],
   layerDefaultAnchor: FramedPoint | undefined,
   api: FrameApi,
-): { distance: number; focusId: LodState['focusId'] } {
-  if (tier.anchor) {
-    return { distance: api.getFocusDistance(tier.anchor), focusId: 'tier' };
+  currentLevel: number,
+): {
+  level: number;
+  distance: number;
+  focusId: LodState['focusId'];
+  heldByHysteresis: boolean;
+} {
+  // Pre-compute each tier's anchor-distance this frame.
+  const distances: number[] = new Array(tiers.length);
+  const focusIds: LodState['focusId'][] = new Array(tiers.length);
+  for (let i = 0; i < tiers.length; i++) {
+    const r = resolveTierDistance(tiers[i], layerDefaultAnchor, api);
+    distances[i] = r.distance;
+    focusIds[i] = r.focusId;
   }
-  if (layerDefaultAnchor) {
-    return { distance: api.getFocusDistance(layerDefaultAnchor), focusId: 'layer-default' };
+
+  // Highest-detail eligible tier: lowest i with distances[i] <= maxDistance[i].
+  let eligible = -1;
+  for (let i = 0; i < tiers.length; i++) {
+    if (distances[i] <= tiers[i].maxDistance) {
+      eligible = i;
+      break;
+    }
   }
-  // getFocusDistance() with no anchor falls back to frame-origin distance
-  // today; once Claude implements orbit-target / flight-target focus, this
-  // will return camera focus automatically. focusId documents the current
-  // contract, not a permanent guarantee.
-  return { distance: api.getFocusDistance(), focusId: 'camera-focus' };
+
+  // Hysteresis: if currently active at prevLevel, and the previous tier is
+  // still "within stretch" of its maxDistance (<= HYSTERESIS_RATIO * max),
+  // hold at prevLevel rather than switching to the newly eligible tier.
+  if (
+    currentLevel >= 0 &&
+    currentLevel < tiers.length &&
+    eligible !== currentLevel
+  ) {
+    const prevMax = tiers[currentLevel].maxDistance;
+    const prevDist = distances[currentLevel];
+    const withinStretch = prevDist <= prevMax * HYSTERESIS_RATIO;
+    if (withinStretch) {
+      return {
+        level: currentLevel,
+        distance: prevDist,
+        focusId: focusIds[currentLevel],
+        heldByHysteresis: true,
+      };
+    }
+  }
+
+  if (eligible === -1) {
+    // Not eligible at any tier. Report the closest tier's distance so callers
+    // can log/debug; focusId from tier 0.
+    const d0 = tiers.length > 0 ? distances[0] : Infinity;
+    const f0 = tiers.length > 0 ? focusIds[0] : null;
+    return { level: -1, distance: d0, focusId: f0, heldByHysteresis: false };
+  }
+
+  return {
+    level: eligible,
+    distance: distances[eligible],
+    focusId: focusIds[eligible],
+    heldByHysteresis: false,
+  };
 }
