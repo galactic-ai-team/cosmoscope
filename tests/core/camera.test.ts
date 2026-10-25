@@ -102,6 +102,16 @@ describe('FrameApi additions for flyTo', () => {
     expect(api.toFrame([1, 0, 0], 'galactic', 'helio')[0]).toBeCloseTo(206264.806, 3);
   });
 
+  it('getTargetPosition and getCameraForward', () => {
+    const cam = new CosmoCamera(new FrameStack());
+    expect(cam.getTargetPosition()).toBeNull();
+    cam.setPose({ frame: 'helio', position: [0, 0, 0], target: { frame: 'helio', position: [0, 0, 2] } });
+    const out = new Float64Array(3);
+    expect(cam.getCameraForward(out)).toBe(out);
+    expect(Array.from(out)).toEqual([0, 0, 1]);
+    expect(cam.getTargetPosition('planet')![2]).toBeCloseTo((2 * METERS.au) / METERS.km, 3);
+  });
+
   it('getCameraDistanceToOrigin is meters to the current frame origin', () => {
     const cam = new CosmoCamera(new FrameStack());
     cam.setPose({ frame: 'helio', position: [3, 4, 0] });
