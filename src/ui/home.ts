@@ -18,6 +18,7 @@ export function isHomeKey(
 /** Listens for the home key and calls goHome(HOME_ID). Returns an unsubscribe function. */
 export function mountHomeKey(goHome: (id: string) => void, doc: Document = document): () => void {
   const onKey = (ev: KeyboardEvent): void => {
+    if (ev.repeat || ev.defaultPrevented) return; // held key, or already handled
     const el = ev.target as HTMLElement | null;
     const modified = ev.ctrlKey || ev.metaKey || ev.altKey;
     if (isHomeKey(ev.key, el?.tagName, el?.isContentEditable === true, modified)) {
