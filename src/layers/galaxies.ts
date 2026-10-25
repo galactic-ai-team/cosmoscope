@@ -78,6 +78,19 @@ const DIAMETER_LY: Record<string, number> = {
 'galaxy:pgc:4713553': 2_000,
 'galaxy:pgc:4713560': 2_000,
 'galaxy:pgc:4689223': 2_000,
+// DIAMETER_LY additions — same framing-placeholder convention as part 1.
+'galaxy:ufd:hydrus-1': 2_000,
+'galaxy:ufd:horologium-1': 2_000,
+'galaxy:ufd:reticulum-2': 2_000,
+'galaxy:ufd:eridanus-2': 2_000,
+'galaxy:ufd:carina-2': 2_000,
+'galaxy:ufd:ursa-major-2': 2_000,
+'galaxy:ufd:ursa-major-1': 2_000,
+'galaxy:ufd:willman-1': 2_000,
+'galaxy:ufd:pegasus-3': 2_000,
+'galaxy:ufd:aquarius-2': 2_000,
+'galaxy:ufd:tucana-2': 2_000,
+'galaxy:ufd:pisces-2': 2_000,
 };
 
 // Lane constants from Claude. GC drives the Milky Way center entry
@@ -174,6 +187,26 @@ const BODIES: BodyDatum[] = [
 { id: 'galaxy:pgc:4713553', name: 'Boötes I', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Boötes', raDeg: 210.025, decDeg: 14.5, distanceMly: 0.1957, blurb: 'The archetypal ultra-faint — the first of its kind recognized.' },
 { id: 'galaxy:pgc:4713560', name: 'Hercules', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Hercules', raDeg: 247.7583, decDeg: 12.7917, distanceMly: 0.4403, blurb: 'A stretched, elongated dwarf, pulled by the Milky Way tides.' },
 { id: 'galaxy:pgc:4689223', name: 'Canes Venatici I', aliases: [], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Canes Venatici', raDeg: 202.0146, decDeg: 33.5558, distanceMly: 0.6849, blurb: 'A brighter classical dwarf — the Hunting Dogs larger companion. Separate scope from the ultra-faint batch.' },
+// BODIES entries — ultra-faint batch, part 2 (ufd slugs, PGCs unknown)
+// Aliases intentionally empty: PGC numbers go here if ever found.
+{ id: 'galaxy:ufd:hydrus-1', name: 'Hydrus 1', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Hydrus', raDeg: 37.389, decDeg: -79.3089, distanceMly: 0.0900, blurb: 'A faint southern dwarf, barely brighter than a star cluster.' },
+// Distance conflict: 68 vs 79/87/100 kpc. Table uses Jerjen 68 (deepest follow-up).
+{ id: 'galaxy:ufd:horologium-1', name: 'Horologium I', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Horologium', raDeg: 43.8820, decDeg: -54.1188, distanceMly: 0.2218, blurb: 'A far southern ultra-faint, one of the dimmest known.' },
+{ id: 'galaxy:ufd:reticulum-2', name: 'Reticulum II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Reticulum', raDeg: 53.9256, decDeg: -54.0492, distanceMly: 0.1031, blurb: 'A tiny Reticulum dwarf, almost entirely old stars.' },
+// Distance conflict: 370 vs 339 kpc; the 370 figure may be Galactocentric.
+{ id: 'galaxy:ufd:eridanus-2', name: 'Eridanus II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Eridanus', raDeg: 56.0838, decDeg: -43.5338, distanceMly: 1.2068, blurb: 'A remote Eridanus dwarf, far out on the Milky Way edge.' },
+// NOT PGC 20125 — that is the old Argo dwarf at ~4 Mpc, ~100x too far.
+{ id: 'galaxy:ufd:carina-2', name: 'Carina II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Carina', raDeg: 114.1066, decDeg: -57.9991, distanceMly: 0.1181, blurb: 'A faint Carina dwarf in the Magellanic neighborhood.' },
+// Distance variant: 30 vs 32/35 kpc; table uses 30.
+{ id: 'galaxy:ufd:ursa-major-2', name: 'Ursa Major II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Ursa Major', raDeg: 132.8750, decDeg: 63.13, distanceMly: 0.0978, blurb: 'A dim Ursa Major dwarf, stretched by galactic tides.' },
+{ id: 'galaxy:ufd:ursa-major-1', name: 'Ursa Major I', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Ursa Major', raDeg: 158.72, decDeg: 51.92, distanceMly: 0.3262, blurb: 'A diffuse Ursa Major dwarf of ancient stars.' },
+{ id: 'galaxy:ufd:willman-1', name: 'Willman 1', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph, debated — possibly star cluster)', constellation: 'Ursa Major', raDeg: 162.3438, decDeg: 51.0501, distanceMly: 0.1257, blurb: 'A debated object — dwarf galaxy or star cluster, still unsettled.' },
+{ id: 'galaxy:ufd:pegasus-3', name: 'Pegasus III', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Pegasus', raDeg: 336.102, decDeg: 5.405, distanceMly: 0.7012, blurb: 'A distant Pegasus dwarf on the far side of the halo.' },
+{ id: 'galaxy:ufd:aquarius-2', name: 'Aquarius II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Aquarius', raDeg: 338.4813, decDeg: -9.3274, distanceMly: 0.3519, blurb: 'A faint Aquarius dwarf of old stars.' },
+// Distance variant: 58 vs 50/70 kpc; table uses 58.
+{ id: 'galaxy:ufd:tucana-2', name: 'Tucana II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Tucana', raDeg: 342.9796, decDeg: -58.5689, distanceMly: 0.1892, blurb: 'A southern Tucana dwarf, faint and far-flung.' },
+// Not Andromeda II, despite the old Martin et al. alias.
+{ id: 'galaxy:ufd:pisces-2', name: 'Pisces II', aliases: [], kind: 'galaxy', type: 'Ultra-faint dwarf (dSph)', constellation: 'Pisces', raDeg: 344.6292, decDeg: 5.9525, distanceMly: 0.5969, blurb: 'A faint Pisces dwarf in the outer halo.' },
 ];
 
 // Catalog entries for Lumi's search + info panels. distanceM stays metres
