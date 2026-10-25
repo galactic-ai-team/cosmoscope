@@ -125,9 +125,10 @@ export class StellarNeighborhood implements ScaleLayer {
   constructor(
     private readonly scene: THREE.Scene,
     camera: CosmoCamera,
+    canvas?: HTMLCanvasElement,
   ) {
     this.camera = camera;
-    this.labels = new StellarLabels(camera);
+    this.labels = new StellarLabels(camera, canvas);
     this.object3D.add(this.labels.object3D);
     this.object3D.name = 'gpt6-stellar-neighborhood';
     this.constellations = new StellarConstellations(camera);
@@ -391,7 +392,8 @@ export class StellarNeighborhood implements ScaleLayer {
 export function makeStarsLayer(
   scene: THREE.Scene,
   camera: CosmoCamera,
+  canvas?: HTMLCanvasElement,
 ): StellarNeighborhood {
-  return new StellarNeighborhood(scene, camera);
+  return new StellarNeighborhood(scene, camera, canvas);
 }
 
