@@ -76,8 +76,9 @@ interface BodyDatum {
 }
 
 // V1 seed: Messier galaxies + great clusters + the galactic center.
-// LMC/SMC and the Local Group dwarfs have no Messier numbers — they join
-// with the catalog-validation pass (PGC namespace is the likely home).
+// Local Group dwarfs + Magellanic Clouds under galaxy:pgc:<n>, verified
+// against Wikipedia/NED designations. Ultra-faints and NGC 147/185 are a
+// later batch, not this one.
 const BODIES: BodyDatum[] = [
   { id: 'galaxy:messier:M31', name: 'Andromeda Galaxy', aliases: ['M31', 'NGC 224'], kind: 'galaxy', type: 'Spiral (Sb)', constellation: 'Andromeda', raDeg: 10.68, decDeg: 41.27, distanceMly: 2.54, blurb: 'Our nearest giant spiral neighbor — on a slow collision course with the Milky Way.' },
   { id: 'galaxy:messier:M32', name: 'M32', aliases: ['NGC 221'], kind: 'galaxy', type: 'Elliptical dwarf (E2)', constellation: 'Andromeda', raDeg: 10.68, decDeg: 40.87, distanceMly: 2.54, blurb: 'A compact elliptical dwarf, a close satellite of Andromeda.' },
@@ -93,6 +94,20 @@ const BODIES: BodyDatum[] = [
   { id: 'cluster:common:virgo', name: 'Virgo Cluster', aliases: ['M87 group'], kind: 'cluster', type: 'Galaxy cluster', constellation: 'Virgo', raDeg: 186.75, decDeg: 12.67, distanceMly: 54, blurb: 'The nearest great cluster — over a thousand galaxies, heart of our supercluster.' },
   { id: 'cluster:abell:1656', name: 'Coma Cluster', aliases: ['Abell 1656'], kind: 'cluster', type: 'Galaxy cluster', constellation: 'Coma Berenices', raDeg: 194.95, decDeg: 27.98, distanceMly: 320, blurb: 'A dense swarm of thousands of galaxies, a classic cosmic-web node.' },
   { id: 'cluster:abell:S373', name: 'Fornax Cluster', aliases: ['Abell S373'], kind: 'cluster', type: 'Galaxy cluster', constellation: 'Fornax', raDeg: 54.73, decDeg: -35.45, distanceMly: 62, blurb: 'The second-richest cluster nearby, a southern-sky anchor of the web.' },
+  { id: 'galaxy:pgc:17223', name: 'Large Magellanic Cloud', aliases: ['LMC', 'Nubecula Major', 'ESO 56-115'], kind: 'galaxy', type: 'Magellanic spiral (SBm)', constellation: 'Dorado', raDeg: 80.89, decDeg: -69.76, distanceMly: 0.163, blurb: 'The Milky Way\'s brightest satellite — a barred dwarf spiral mid-interaction with the SMC.' },
+  { id: 'galaxy:pgc:3085', name: 'Small Magellanic Cloud', aliases: ['SMC', 'NGC 292', 'Nubecula Minor'], kind: 'galaxy', type: 'Irregular (SBm pec)', constellation: 'Tucana', raDeg: 13.19, decDeg: -72.83, distanceMly: 0.204, blurb: 'The smaller Cloud — a disrupted barred irregular, paired with the LMC.' },
+  { id: 'galaxy:pgc:4689212', name: 'Sagittarius Dwarf', aliases: ['Sgr dSph', 'Sag DEG'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Sagittarius', raDeg: 283.83, decDeg: -30.55, distanceMly: 0.080, blurb: 'Being torn apart by the Milky Way right now — its stream wraps the whole sky.' },
+  { id: 'galaxy:pgc:10074', name: 'Fornax Dwarf', aliases: ['Fornax dSph', 'ESO 356-4'], kind: 'galaxy', type: 'Dwarf elliptical (dE0)', constellation: 'Fornax', raDeg: 40.00, decDeg: -34.45, distanceMly: 0.466, blurb: 'The brightest classical dwarf spheroidal — and it hosts six globular clusters.' },
+  { id: 'galaxy:pgc:3589', name: 'Sculptor Dwarf', aliases: ['Sculptor dSph', 'ESO 351-30'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Sculptor', raDeg: 15.04, decDeg: -33.71, distanceMly: 0.290, blurb: 'One of the first dwarfs ever found — ancient, metal-poor, nearly pristine.' },
+  { id: 'galaxy:pgc:19441', name: 'Carina Dwarf', aliases: ['Carina dSph', 'ESO 206-G20'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Carina', raDeg: 100.40, decDeg: -50.97, distanceMly: 0.330, blurb: 'A bursty little dwarf — star formation in distinct episodes across billions of years.' },
+  { id: 'galaxy:pgc:88608', name: 'Sextans Dwarf', aliases: ['Sextans I', 'Sextans dSph'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Sextans', raDeg: 153.26, decDeg: -1.61, distanceMly: 0.290, blurb: 'Faint and diffuse — one of the lowest-surface-brightness dwarfs known.' },
+  { id: 'galaxy:pgc:29488', name: 'Leo I', aliases: ['Regulus Dwarf', 'DDO 74', 'UGC 5470'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Leo', raDeg: 152.11, decDeg: 12.31, distanceMly: 0.820, blurb: 'The most distant classical Milky Way satellite — hiding in Regulus\'s glare.' },
+  { id: 'galaxy:pgc:34176', name: 'Leo II', aliases: ['Leo B', 'DDO 93'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Leo', raDeg: 168.37, decDeg: 22.15, distanceMly: 0.690, blurb: 'A quiet old dwarf — mostly ancient stars, barely a whisper of gas left.' },
+  { id: 'galaxy:pgc:54074', name: 'Ursa Minor Dwarf', aliases: ['UMi Dwarf', 'DDO 199', 'UGC 9749'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Ursa Minor', raDeg: 227.29, decDeg: 67.22, distanceMly: 0.200, blurb: 'A dark-matter-dominated relic — almost no star formation for billions of years.' },
+  { id: 'galaxy:pgc:60095', name: 'Draco Dwarf', aliases: ['Draco dSph', 'DDO 208', 'UGC 10822'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Draco', raDeg: 260.05, decDeg: 57.92, distanceMly: 0.260, blurb: 'One of the most dark-matter-dominated objects known.' },
+  { id: 'galaxy:pgc:2666', name: 'Andromeda I', aliases: ['And I'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Andromeda', raDeg: 11.42, decDeg: 38.04, distanceMly: 2.40, blurb: 'M31\'s closest dwarf spheroidal companion.' },
+  { id: 'galaxy:pgc:4601', name: 'Andromeda II', aliases: ['And II'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Pisces', raDeg: 19.12, decDeg: 33.42, distanceMly: 2.22, blurb: 'An M31 satellite with an unusually extended star-formation history.' },
+  { id: 'galaxy:pgc:2121', name: 'Andromeda III', aliases: ['And III'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Andromeda', raDeg: 8.89, decDeg: 36.50, distanceMly: 2.44, blurb: 'A faint M31 companion, found on the same 1970 plates as And I and II.' },
 ];
 
 // Catalog entries for Lumi's search + info panels. distanceM stays metres
@@ -106,7 +121,9 @@ export const GALAXY_ENTRIES: CatalogEntry[] = BODIES.map((b) => ({
   facts: {
     Type: b.type,
     Constellation: b.constellation,
-    Distance: `${b.distanceMly} million light-years`,
+    Distance: b.distanceMly >= 1
+      ? `${b.distanceMly} million light-years`
+      : `${Math.round(b.distanceMly * 1000)} thousand light-years`,
   },
   blurb: b.blurb,
 }));
@@ -125,11 +142,14 @@ BODIES.forEach((b, i) => {
 });
 
 // Color by type: spirals cool blue-white, ellipticals gold, irregulars
-// teal, clusters magenta. Documented so the legend can reuse it.
+// teal, dwarfs lavender, clusters magenta. Documented so the legend can
+// reuse it. Elliptical is checked before dwarf so M32/M110 stay gold.
 function colorFor(b: BodyDatum): THREE.Color {
   if (b.kind === 'cluster') return new THREE.Color(0xff9ecb);
-  if (b.type.startsWith('Elliptical')) return new THREE.Color(0xffd9a0);
-  if (b.type.includes('irregular')) return new THREE.Color(0x9fe8d0);
+  const t = b.type.toLowerCase();
+  if (t.startsWith('elliptical')) return new THREE.Color(0xffd9a0);
+  if (t.includes('irregular')) return new THREE.Color(0x9fe8d0);
+  if (t.includes('dwarf')) return new THREE.Color(0xc4b5fd);
   return new THREE.Color(0xbfd4ff);
 }
 
