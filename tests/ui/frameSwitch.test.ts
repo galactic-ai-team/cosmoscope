@@ -13,13 +13,18 @@ describe('chooseFrame (helio <-> galactic auto-rebase)', () => {
 
   it('returns to helio near the Sun', () => {
     expect(chooseFrame('galactic', 50 * 3.0857e16)).toBe('galactic');
-    expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99)).toBe('helio');
+    expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99, 'helio')).toBe('helio');
+  });
+
+  it('stays galactic near the Sun when the target is not a solar-system object', () => {
+    expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99, 'galactic')).toBe('galactic');
+    expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99)).toBe('galactic');
   });
 
   it('has hysteresis between the two thresholds', () => {
     const mid = (ENTER_HELIO_M + LEAVE_HELIO_M) / 2;
     expect(chooseFrame('helio', mid)).toBe('helio');
-    expect(chooseFrame('galactic', mid)).toBe('galactic');
+    expect(chooseFrame('galactic', mid, 'helio')).toBe('galactic');
   });
 
   it('never touches planet or cosmic frames', () => {

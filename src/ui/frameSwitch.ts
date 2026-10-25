@@ -12,9 +12,14 @@ export const LEAVE_HELIO_M = 1_000 * AU;
 /** galactic -> helio once the camera comes back this close to the Sun. */
 export const ENTER_HELIO_M = 500 * AU;
 
-/** Frame the camera should be in, given its current frame and metres from the Sun. */
-export function chooseFrame(current: FrameId, metresFromSun: number): FrameId {
+/**
+ * Frame the camera should be in, given its current frame, metres from the Sun
+ * and the frame of what it's looking at. It only drops back into 'helio' when
+ * the target is a solar-system object, so a Sun or star view near the Sun
+ * keeps the (galactic-only) star field, as before.
+ */
+export function chooseFrame(current: FrameId, metresFromSun: number, targetFrame: FrameId | null = null): FrameId {
   if (current === 'helio' && metresFromSun > LEAVE_HELIO_M) return 'galactic';
-  if (current === 'galactic' && metresFromSun < ENTER_HELIO_M) return 'helio';
+  if (current === 'galactic' && targetFrame === 'helio' && metresFromSun < ENTER_HELIO_M) return 'helio';
   return current;
 }

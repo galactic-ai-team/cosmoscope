@@ -174,7 +174,7 @@ renderer.setAnimationLoop((ms: number) => {
   controls.enabled = !flight.active; // Claude: controls stand down mid-flight
   controls.update(dt);  // Claude: eased orbit/zoom around the target
   if (!flight.active) {  // Lumi: helio <-> galactic by distance from the Sun (exact rebase)
-    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT));
+    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT), camera.getTarget(hudTarget)?.frame ?? null);
     if (want !== camera.getFrameId()) camera.rebaseTo(want); // orbit axis stays the target's
   }
   camera.update();      // Claude: sync the three.js puppet before layers read it
