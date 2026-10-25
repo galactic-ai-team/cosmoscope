@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { METERS } from '../../src/core/frames';
 import { chooseFrame, ENTER_HELIO_M, LEAVE_HELIO_M } from '../../src/ui/frameSwitch';
 
-const AU = 1.495978707e11;
+const AU = METERS.au;
 
 describe('chooseFrame (helio <-> galactic auto-rebase)', () => {
   it('leaves helio once past the solar system', () => {
@@ -19,6 +20,11 @@ describe('chooseFrame (helio <-> galactic auto-rebase)', () => {
   it('stays galactic near the Sun when the target is not a solar-system object', () => {
     expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99, 'galactic')).toBe('galactic');
     expect(chooseFrame('galactic', ENTER_HELIO_M * 0.99)).toBe('galactic');
+  });
+
+  it('leaves helio where the solar fade ends (no dark band)', () => {
+    expect(chooseFrame('helio', 121 * AU)).toBe('galactic');
+    expect(chooseFrame('helio', 119 * AU)).toBe('helio');
   });
 
   it('has hysteresis between the two thresholds', () => {

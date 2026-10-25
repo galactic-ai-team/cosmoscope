@@ -4,13 +4,16 @@
 // never activate and the view goes black. Hysteresis keeps a camera hovering
 // near the boundary from flipping every frame. rebaseTo() is exact, so the
 // switch itself doesn't move anything on screen.
-import type { FrameId } from '../core/frames';
+import { METERS, type FrameId } from '../core/frames';
 
-const AU = 1.495978707e11;
-/** helio -> galactic once the camera is this far from the Sun (past the solar fade). */
-export const LEAVE_HELIO_M = 1_000 * AU;
-/** galactic -> helio once the camera comes back this close to the Sun. */
-export const ENTER_HELIO_M = 500 * AU;
+/**
+ * helio -> galactic where Gemini's solar fade ends (120 AU, solarSystemLayer.ts),
+ * so stars switch on as the planets finish fading and there's no dark band.
+ * Keep in step with that fadeEnd (Claude's #44 review).
+ */
+export const LEAVE_HELIO_M = 120 * METERS.au;
+/** galactic -> helio once the camera comes back this close to the Sun (hysteresis band). */
+export const ENTER_HELIO_M = 80 * METERS.au;
 
 /**
  * Frame the camera should be in, given its current frame, metres from the Sun
