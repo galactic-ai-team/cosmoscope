@@ -10,6 +10,7 @@ export const HELP_ITEMS: readonly HelpItem[] = [
   { keys: '/', does: 'Jump to search' },
   { keys: 'Enter', does: 'Fly to the highlighted search result' },
   { keys: 'Grab the view', does: 'Stop a flight or the Grand Tour' },
+  { keys: 'H', does: 'Fly home to the Sun' },
   { keys: 'C', does: 'Constellation lines: Auto / On / Off' },
   { keys: '?', does: 'Show or hide this help' },
   { keys: 'Esc', does: 'Close this help' },
