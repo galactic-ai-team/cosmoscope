@@ -3,6 +3,8 @@
 // Contract: ids are <kind>:<catalog>:<id> (e.g. galaxy:messier:M31), see docs/CONTRACTS.md.
 
 export type TargetKind = 'planet' | 'star' | 'galaxy';
+/** Id prefixes search can route. 'cluster' = galaxy clusters (Virgo, Coma, Fornax) from Nova's galaxies data. */
+export type PickKind = TargetKind | 'cluster';
 export type Approach = 'orbit' | 'surface' | 'flyby';
 
 /** Structural match for Dee's FlyToController.flyTo (src/core/flyTo.ts). */
@@ -10,14 +12,24 @@ export interface Flyer {
   flyTo(t: { kind: TargetKind; id: string; approach: Approach }, now?: number): { promise: Promise<void>; cancel(): void };
 }
 
-const KINDS: readonly TargetKind[] = ['planet', 'star', 'galaxy'];
+const KINDS: readonly PickKind[] = ['planet', 'star', 'galaxy', 'cluster'];
 
-/** Infer the target kind from an id prefix, or null if the prefix is unknown. */
-export function kindFromId(id: string): TargetKind | null {
+/** Infer the pick kind from an id prefix, or null if the prefix is unknown. */
+export function kindFromId(id: string): PickKind | null {
   const idx = id.indexOf(':');
   if (idx <= 0) return null;
-  const k = id.slice(0, idx) as TargetKind;
+  const k = id.slice(0, idx) as PickKind;
   return KINDS.includes(k) ? k : null;
+}
+
+/**
+ * Map a pick kind to a kind Dee's FlyToTarget accepts. Dee's flyTo resolves
+ * targets by id via registry.resolveTarget, so kind is informational only;
+ * a galaxy cluster flies like a galaxy (same extragalactic scale/frames).
+ * TODO(Dee): if FlyToTarget.kind gains 'cluster', drop this mapping.
+ */
+export function flightKind(k: PickKind): TargetKind {
+  return k === 'cluster' ? 'galaxy' : k;
 }
 
 /**
@@ -40,7 +52,7 @@ export function linkSearchToFlight(
     current?.cancel();
     // Tag this pick; only the latest pick's handlers fire.
     const mine = ++seq;
-    const h = flyer.flyTo({ kind, id, approach: 'orbit' }, now());
+    const h = flyer.flyTo({ kind: flightKind(kind), id, approach: 'orbit' }, now());
     current = h;
     h.promise.then(
       () => { if (mine === seq) onArrive(id); },
