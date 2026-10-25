@@ -7,23 +7,48 @@ const MAX_LABEL_DISTANCE_LY = 1_500;
 const LABEL_FADE_START_LY = 900;
 const PC_TO_LY = 3.26156;
 
+const LABEL_SCALE = 0.025;
+const COLLISION_PADDING_PX = 7;
+
 type StarLabel = {
   row: HygRow;
   sprite: THREE.Sprite;
   material: THREE.SpriteMaterial;
   texture: THREE.CanvasTexture;
   position: Float64Array;
+  textFraction: number;
 };
 
+type Rect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return (
+    a.left < b.right &&
+    a.right > b.left &&
+    a.top < b.bottom &&
+    a.bottom > b.top
+  );
+}
+
 /**
- * Camera-relative, distance-aware labels for named HYG stars.
- * Builds textures once and reuses all objects during update().
+ * Brightest-first stellar labels.
+ * Screen-space collisions hide lower-priority labels.
+ * All render-loop scratch objects are reused.
  */
 export class StellarLabels {
   readonly object3D = new THREE.Group();
 
   private readonly labels: StarLabel[] = [];
+  private readonly occupied: Rect[] = [];
+
   private readonly scratch = new THREE.Vector3();
+  private readonly cameraSpace = new THREE.Vector3();
+  private readonly projected = new THREE.Vector3();
 
   constructor(private readonly camera: CosmoCamera) {
     this.object3D.name = 'stellar-labels';
@@ -33,7 +58,7 @@ export class StellarLabels {
     this.dispose();
 
     const selected = rows
-      .filter((row) =>
+      .filter(row =>
         row[7].trim().length > 0 &&
         Number.isFinite(row[4]) &&
         row[9] > 0
@@ -49,15 +74,21 @@ export class StellarLabels {
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
 
-      ctx.clearRect(0, 0, 512, 96);
       ctx.font = '500 36px sans-serif';
+
+      const textFraction = Math.min(
+        1,
+        (ctx.measureText(row[7]).width + 24) / 512,
+      );
+
+      ctx.clearRect(0, 0, 512, 96);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       ctx.shadowColor = '#000000';
       ctx.shadowBlur = 12;
       ctx.lineWidth = 5;
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
       ctx.strokeText(row[7], 256, 48);
 
       ctx.fillStyle = '#eaf1ff';
@@ -81,11 +112,13 @@ export class StellarLabels {
       sprite.visible = false;
 
       this.object3D.add(sprite);
+
       this.labels.push({
         row,
         sprite,
         material,
         texture,
+        textFraction,
         position: new Float64Array([
           row[1], row[2], row[3],
         ]),
@@ -94,23 +127,30 @@ export class StellarLabels {
   }
 
   update(cameraDistanceLy: number, starOpacity: number): void {
-    const distanceFade = THREE.MathUtils.clamp(
+    const fade = THREE.MathUtils.clamp(
       (MAX_LABEL_DISTANCE_LY - cameraDistanceLy) /
         (MAX_LABEL_DISTANCE_LY - LABEL_FADE_START_LY),
       0,
       1,
     );
 
-    const opacity = distanceFade * starOpacity;
+    const opacity = fade * starOpacity;
     const active = opacity > 0.001;
+
+    const cam = this.camera.three;
+    const viewportWidth = document.documentElement.clientWidth;
+    const viewportHeight = document.documentElement.clientHeight;
+
+    this.occupied.length = 0;
 
     for (const label of this.labels) {
       const { sprite, material, position } = label;
+      sprite.visible = false;
 
-      if (!active) {
-        sprite.visible = false;
-        continue;
-      }
+      if (!active) continue;
+
+      const starDistanceLy = label.row[9] * PC_TO_LY;
+      if (starDistanceLy >= MAX_LABEL_DISTANCE_LY) continue;
 
       this.camera.toCameraRelative(
         position,
@@ -118,22 +158,69 @@ export class StellarLabels {
         this.scratch,
       );
 
-      // Camera-relative coordinates are expressed in parsecs.
-      const distancePc = this.scratch.length();
-      const starDistanceLy = label.row[9] * PC_TO_LY;
+      const distanceRender = this.scratch.length();
 
-      // Nearby labels are useful; distant labels add clutter.
-      const nearby = starDistanceLy < MAX_LABEL_DISTANCE_LY;
-
-      sprite.visible = nearby;
-      if (!nearby) continue;
+      const height = Math.max(
+        distanceRender * LABEL_SCALE,
+        0.0001,
+      );
+      const width = height * (512 / 96);
 
       sprite.position.copy(this.scratch);
+      sprite.scale.set(width, height, 1);
 
-      // Maintain approximately constant angular label size.
-      const scale = Math.max(distancePc * 0.018, 0.0001);
-      sprite.scale.set(scale * (512 / 96), scale, 1);
+      // Depth in the perspective camera's local frame.
+      this.cameraSpace
+        .copy(this.scratch)
+        .applyMatrix4(cam.matrixWorldInverse);
 
+      const depth = -this.cameraSpace.z;
+      if (depth <= cam.near) continue;
+
+      this.projected.copy(this.scratch).project(cam);
+
+      const p = this.projected;
+      if (
+        p.z < -1 || p.z > 1 ||
+        Math.abs(p.x) > 1.1 ||
+        Math.abs(p.y) > 1.1
+      ) continue;
+
+      const x = (p.x + 1) * viewportWidth * 0.5;
+      const y = (1 - p.y) * viewportHeight * 0.5;
+
+      const heightPx =
+        height *
+        cam.projectionMatrix.elements[5] *
+        viewportHeight * 0.5 /
+        depth;
+
+      const widthPx =
+        heightPx * (512 / 96) * label.textFraction;
+
+      const pad = COLLISION_PADDING_PX;
+
+      // Sprite anchor is bottom-center.
+      const rect: Rect = {
+        left: x - widthPx / 2 - pad,
+        right: x + widthPx / 2 + pad,
+        top: y - heightPx - pad,
+        bottom: y + pad,
+      };
+
+      let blocked = false;
+
+      for (const other of this.occupied) {
+        if (overlaps(rect, other)) {
+          blocked = true;
+          break;
+        }
+      }
+
+      if (blocked) continue;
+
+      this.occupied.push(rect);
+      sprite.visible = true;
       material.opacity = opacity;
     }
   }
@@ -150,6 +237,6 @@ export class StellarLabels {
     }
 
     this.labels.length = 0;
+    this.occupied.length = 0;
   }
 }
-
