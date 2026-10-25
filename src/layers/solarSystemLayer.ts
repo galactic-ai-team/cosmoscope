@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
 import { FrameApi } from '../core/camera';
 import { FrameId } from '../core/frames';
+import type { CosmoCamera } from '../core/camera';
 import { register, CatalogEntry } from '../catalog';
 
 interface PlanetData {
@@ -78,11 +79,14 @@ export class SolarSystemLayer implements ScaleLayer {
   }[] = [];
   private sunMesh!: THREE.Mesh;
   private scene: THREE.Scene;
+  private camera?: CosmoCamera;
+  private static readonly ORIGIN = new Float64Array([0, 0, 0]);
   private daysSinceJ2000 = 0;
   private isInitialized = false;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, camera?: CosmoCamera) {
     this.scene = scene;
+    this.camera = camera;
     this.container = new THREE.Group();
     this.container.name = 'SolarSystemLayer';
 
@@ -203,6 +207,15 @@ export class SolarSystemLayer implements ScaleLayer {
 
   public update(dt: number): void {
     this.daysSinceJ2000 += dt * 5.0;
+
+    // Lumi: Claude's camera recipe. Meshes are authored in AU around the Sun,
+    // so place the container camera-relative and scale AU to render units.
+    // Without this the container sits at render origin (the camera) and
+    // planets are off-screen when you arrive.
+    if (this.camera) {
+      this.camera.toCameraRelative(SolarSystemLayer.ORIGIN, 'helio', this.container.position);
+      this.container.scale.setScalar(this.camera.layerScale('helio'));
+    }
 
     if (this.sunMesh) {
       this.sunMesh.rotation.y += dt * 0.05;

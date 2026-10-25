@@ -173,6 +173,9 @@ register(GALAXY_ENTRIES);
 
 // Galactic-frame positions in PARSECS (float64), computed once at load.
 const positionsPc = new Float64Array(BODIES.length * 3);
+// Body diameters in parsecs, same source as resolveTarget's approachRadius
+// (DIAMETER_LY, framing only) — drives the size-scaled sprite below.
+const diametersPc = new Float64Array(BODIES.length);
 const byId = new Map<string, number>();
 BODIES.forEach((b, i) => {
   byId.set(b.id, i);
@@ -180,6 +183,7 @@ BODIES.forEach((b, i) => {
   positionsPc[i * 3] = x;
   positionsPc[i * 3 + 1] = y;
   positionsPc[i * 3 + 2] = z;
+  diametersPc[i] = (DIAMETER_LY[b.id] ?? b.distanceMly * 1e6 * 0.4) / LY_PER_PC;
 });
 
 // Color by type: spirals cool blue-white, ellipticals gold, irregulars
@@ -259,13 +263,46 @@ export function createGalaxiesLayer(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const material = new THREE.PointsMaterial({
-    size: 6,
-    sizeAttenuation: false,
-    map: makeGlowTexture(),
+  // Per-point size in render units, refilled in update() alongside positions.
+  const sizes = new Float32Array(n);
+  geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+  // Size-scaled sprites: each galaxy renders at its true angular size
+  // (diameter / distance), so M31 at arrival fills ~a third of the view
+  // instead of a fixed 6px dot. PointsMaterial can't do per-point size,
+  // hence a ShaderMaterial with three's standard attenuation convention
+  // (gl_PointSize ∝ size / distance × viewportHeight/2 — exact at fov 90°,
+  // within ~2× for typical fovs). Clamped: max 40% of viewport height so a
+  // galaxy you're inside doesn't white out the screen, min 2px so distant
+  // dwarfs stay findable.
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: makeGlowTexture() },
+      uScale: { value: 1 },
+      uViewportH: { value: 1 },
+    },
+    vertexShader: /* glsl */ `
+      attribute float aSize;
+      uniform float uScale;
+      uniform float uViewportH;
+      varying vec3 vColor;
+      void main() {
+        vColor = color;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        float px = aSize * (uScale / -mvPosition.z);
+        gl_PointSize = clamp(px, 2.0, uViewportH * 0.4);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D map;
+      varying vec3 vColor;
+      void main() {
+        vec4 tex = texture2D(map, gl_PointCoord);
+        gl_FragColor = vec4(vColor, 0.95) * tex;
+      }
+    `,
     vertexColors: true,
     transparent: true,
-    opacity: 0.95,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -292,14 +329,26 @@ export function createGalaxiesLayer(
 
     update(_dt: number, _distance: number, _api: FrameApi): void {
       const attr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      const sizeAttr = geometry.getAttribute('aSize') as THREE.BufferAttribute;
+      // Render units per galactic parsec — same scale toCameraRelative
+      // applies to positions, so sizes and positions stay in one space.
+      const scale = camera.layerScale('galactic');
       for (let i = 0; i < n; i++) {
         scratch[0] = positionsPc[i * 3];
         scratch[1] = positionsPc[i * 3 + 1];
         scratch[2] = positionsPc[i * 3 + 2];
         camera.toCameraRelative(scratch, 'galactic', tmpVec);
         attr.setXYZ(i, tmpVec.x, tmpVec.y, tmpVec.z);
+        sizeAttr.setX(i, diametersPc[i] * scale);
       }
       attr.needsUpdate = true;
+      sizeAttr.needsUpdate = true;
+      // Viewport height in device pixels (drawing-buffer height) for the
+      // attenuation math. Assumes a fullscreen canvas — main.ts can pass
+      // renderer.getDrawingBufferSize() later for exactness.
+      const viewportH = window.innerHeight * window.devicePixelRatio;
+      material.uniforms.uScale.value = viewportH * 0.5;
+      material.uniforms.uViewportH.value = viewportH;
     },
 
     resolveTarget: resolveGalaxyTarget,
