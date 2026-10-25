@@ -25,6 +25,7 @@ import { createTour } from './ui/tour';
 import { mountHelp } from './ui/help';
 import { mountConstellationToggle } from './ui/constellations';
 import { mountHomeKey } from './ui/home';
+import { orbitUpFor } from './ui/orbitUp';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -101,6 +102,8 @@ const flyer: Flyer = {
         position: camera.getCameraWorldPosition(),
         target: { frame: r.frameId, position: r.worldPos },
       });
+      // Solar-system arrivals orbit around ecliptic north (Claude's idea, Lumi).
+      controls.setUp(orbitUpFor(r.frameId));
     }
     currentFlight = flight.flyTo(t, at ?? now);
     return currentFlight;
