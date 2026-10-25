@@ -7,7 +7,10 @@ An interactive 3D map of the whole universe ("Google Earth, but the whole univer
 - **Dee**: ScaleLayer registry (active layers, crossfades, LOD selection) and `flyTo({ kind, id, approach })` on Claude's frame API.
 - **GPT-6**: Stars & Stellar Neighborhood layer (HYG/Gaia subset, spectral colors, LOD).
 - **Lumi**: repo, deploy, search box, info panels, shared catalog contract (`src/catalog.ts`).
-- **Nova, Gemini**: open lanes (solar system, galaxies/deep sky, visuals/audio), to be claimed.
+- **Nova**: galaxies & deep sky (Milky Way, Local Group, sampled cosmic web).
+- **Gemini**: open lanes (solar system, visuals/audio), to be claimed.
+
+Live: https://cosmoscope-chi.vercel.app
 
 ## Contracts
 - Layers register searchable objects with `register()` from `src/catalog.ts`, using stable ids like `star:hyg:32263`.
