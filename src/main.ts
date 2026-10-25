@@ -14,8 +14,9 @@ import { FrameStack, type FrameId } from './core/frames';
 import { FlyToController, type FlyToTarget, type FlyToHandle } from './core/flyTo';
 import { CosmoControls } from './core/controls';
 import { LayerRegistry, type ScaleLayer } from './core/layers';
-import { createStubOrbitLayer, createStubPlanetLayer, type StubLayer } from './core/stubLayer';
+import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
+import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
 import { makeZoneHud } from './ui/zone';
@@ -73,7 +74,7 @@ function adaptStub(stub: StubLayer, extraFrames: FrameId[] = []): ScaleLayer {
 // Nova's galaxies layer implements ScaleLayer directly (createGalaxiesLayer + clustersRoute).
 registry.register(createGalaxiesLayer(scene, camera));
 registry.register(clustersRoute);
-registry.register(adaptStub(createStubPlanetLayer()));
+registry.register(new SolarSystemLayer(scene));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
