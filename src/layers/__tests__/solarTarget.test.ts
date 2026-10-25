@@ -14,7 +14,7 @@ describe('SolarSystemLayer.resolveTarget', () => {
     const layer = new SolarSystemLayer(scene, camera);
     const r = layer.resolveTarget('planet:mars')!;
     layer.enter(camera);
-    layer.update(0);
+    layer.update(0, 1);
     const mars = scene.getObjectByName('planet:mars')!;
     expect(r.worldPos[0]).toBeCloseTo(mars.position.x, 9);
     expect(r.worldPos[2]).toBeCloseTo(mars.position.z, 9);
