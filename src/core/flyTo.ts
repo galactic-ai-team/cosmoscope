@@ -3,12 +3,19 @@
 // the layer registry and animates Claude's frame API through frame boundaries.
 // Time is in seconds (matches main.ts loop). All frames share ICRS axes, so
 // interpolation is position-only — no axis rotation between frames.
+//
+// Correctness note: resolveTarget returns the target's POSITION in its native
+// frame, not a direction. The flight lands the camera at
+//   targetPos + approachDist * unit(fromTargetToStart)
+// so the camera sits approachDist from the TARGET, looking AT it — not from
+// the frame origin. Look-at is applied every frame so the camera orients
+// toward the target throughout the flight.
 
 import type { FrameApi } from './camera';
 import type { FrameId } from './frames';
 import type { LayerRegistry, ResolvedTarget } from './layers';
 
-export type TargetKind = 'planet' | 'star' | 'galaxy';
+export type TargetKind = 'planet' | 'star' | 'galaxy' | 'cluster';
 export type Approach = 'orbit' | 'surface' | 'flyby';
 
 export interface FlyToTarget {
@@ -36,9 +43,16 @@ interface FlightState {
   startTime: number;
   duration: number;
   startFrame: FrameId;
+  /** Camera position at flight start, in target's frame. */
   startPos: Float64Array;
-  startDist: number;
-  target: ResolvedTarget;
+  /** Camera distance from target at flight start. */
+  startDistToTarget: number;
+  /** Unit direction from target toward start camera. */
+  startDir: Float64Array;
+  /** Target position in its native frame (fixed). */
+  targetPos: Float64Array;
+  targetFrame: FrameId;
+  /** Desired final distance from target. */
   endDist: number;
   resolve: () => void;
 }
@@ -66,12 +80,33 @@ export class FlyToController {
       this.state = null;
     }
 
+    // --- Compute flight start relative to the target, in the target's frame.
+    const targetFrame = resolved.frameId;
+    const targetPos = new Float64Array([
+      resolved.worldPos[0],
+      resolved.worldPos[1],
+      resolved.worldPos[2],
+    ]);
+
     const startPos = new Float64Array(3);
-    this.api.getCameraWorldPosition(resolved.frameId, startPos);
-    const startDist = Math.hypot(startPos[0], startPos[1], startPos[2]);
+    this.api.getCameraWorldPosition(targetFrame, startPos);
+
+    // Vector from target to camera start.
+    let dxs = startPos[0] - targetPos[0];
+    let dys = startPos[1] - targetPos[1];
+    let dzs = startPos[2] - targetPos[2];
+    let startDist = Math.hypot(dxs, dys, dzs);
+
+    // Degenerate case: camera exactly at target. Pick an arbitrary direction.
+    if (startDist < 1e-9) {
+      dxs = 1; dys = 0; dzs = 0;
+      startDist = 1e-9;
+    }
+    const startDir = new Float64Array([dxs / startDist, dys / startDist, dzs / startDist]);
 
     const endDist = resolved.approachRadius * APPROACH_SCALE[target.approach];
 
+    // Duration scales with log distance ratio, clamped.
     const ratio = Math.max(
       1,
       Math.max(startDist, endDist) / Math.max(1e-12, Math.min(startDist, endDist)),
@@ -93,8 +128,10 @@ export class FlyToController {
       duration,
       startFrame: this.api.getFrameId(),
       startPos,
-      startDist,
-      target: resolved,
+      startDistToTarget: startDist,
+      startDir,
+      targetPos,
+      targetFrame,
       endDist,
       resolve: resolveFn,
     };
@@ -122,33 +159,28 @@ export class FlyToController {
     const rawT = Math.min(1, elapsed / s.duration);
     const eased = rawT * rawT * (3 - 2 * rawT);
 
-    const startLog = Math.log10(Math.max(1e-12, s.startDist));
+    // Interpolate DISTANCE FROM TARGET in log space. This is the fix: distance
+    // is measured from the target, not from the frame origin.
+    const startLog = Math.log10(Math.max(1e-12, s.startDistToTarget));
     const endLog = Math.log10(Math.max(1e-12, s.endDist));
     const curLog = startLog + (endLog - startLog) * eased;
-    const curDist = Math.pow(10, curLog);
+    const curDistFromTarget = Math.pow(10, curLog);
 
-    const sx = s.startPos[0], sy = s.startPos[1], sz = s.startPos[2];
-    const sLen = Math.max(1e-12, Math.hypot(sx, sy, sz));
-    const dsx = sx / sLen, dsy = sy / sLen, dsz = sz / sLen;
-
-    const tx = s.target.worldPos[0];
-    const ty = s.target.worldPos[1];
-    const tz = s.target.worldPos[2];
-    const tLen = Math.max(1e-12, Math.hypot(tx, ty, tz));
-    const dtx = tx / tLen, dty = ty / tLen, dtz = tz / tLen;
-
-    let dx = dsx + (dtx - dsx) * eased;
-    let dy = dsy + (dty - dsy) * eased;
-    let dz = dsz + (dtz - dsz) * eased;
-    const dLen = Math.max(1e-12, Math.hypot(dx, dy, dz));
-    dx /= dLen; dy /= dLen; dz /= dLen;
-
+    // Direction: startDir rotates toward the camera's final approach direction.
+    // For a stationary target we want the camera to swing around it as it
+    // approaches, ending on the "near" side. Simplest good-looking choice:
+    // keep the start direction fixed and just shorten the distance. That
+    // makes it a straight-line dolly-in, which is what users expect from
+    // "fly to". If we ever want an arc, interpolate startDir toward a final
+    // dir chosen by the layer.
     const outPos = new Float64Array(3);
-    outPos[0] = dx * curDist;
-    outPos[1] = dy * curDist;
-    outPos[2] = dz * curDist;
+    outPos[0] = s.targetPos[0] + s.startDir[0] * curDistFromTarget;
+    outPos[1] = s.targetPos[1] + s.startDir[1] * curDistFromTarget;
+    outPos[2] = s.targetPos[2] + s.startDir[2] * curDistFromTarget;
 
-    this.api.setCameraFrameAndPosition(s.target.frameId, outPos);
+    this.api.setCameraFrameAndPosition(s.targetFrame, outPos);
+    // Orient camera toward target every frame.
+    this.api.lookAt(s.targetPos);
 
     if (rawT >= 1) {
       s.resolve();
