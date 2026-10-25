@@ -79,6 +79,7 @@ export class SolarSystemLayer implements ScaleLayer {
   private sunMesh!: THREE.Mesh;
   private scene: THREE.Scene;
   private daysSinceJ2000 = 0;
+  private isInitialized = false;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -89,9 +90,14 @@ export class SolarSystemLayer implements ScaleLayer {
     const j2000Epoch = Date.UTC(2000, 0, 1, 12, 0, 0);
     const now = Date.now();
     this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
+
+    this.buildSolarSystem();
   }
 
-  public enter(_api: FrameApi): void {
+  private buildSolarSystem(): void {
+    if (this.isInitialized) return;
+    this.isInitialized = true;
+
     // 1. Create Sun
     const sunGeo = new THREE.SphereGeometry(15, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
@@ -99,7 +105,7 @@ export class SolarSystemLayer implements ScaleLayer {
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
 
-    // Register Sun in global catalog
+    // Register Sun in global catalog for search/fly-to from start view
     register([{
       id: 'star:sol:sun',
       name: 'Sun',
@@ -193,7 +199,12 @@ export class SolarSystemLayer implements ScaleLayer {
     });
 
     register(catalogEntries);
-    this.scene.add(this.container);
+  }
+
+  public enter(_api: FrameApi): void {
+    if (!this.container.parent) {
+      this.scene.add(this.container);
+    }
   }
 
   public update(dt: number): void {
@@ -252,18 +263,6 @@ export class SolarSystemLayer implements ScaleLayer {
   public exit(): void {
     if (this.container.parent) {
       this.container.parent.remove(this.container);
-    }
-    this.planetMeshes.forEach((item) => {
-      item.mesh.geometry.dispose();
-      if (Array.isArray(item.mesh.material)) {
-        item.mesh.material.forEach(m => m.dispose());
-      } else {
-        item.mesh.material.dispose();
-      }
-    });
-    if (this.sunMesh) {
-      this.sunMesh.geometry.dispose();
-      (this.sunMesh.material as THREE.Material).dispose();
     }
   }
 }
