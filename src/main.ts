@@ -18,7 +18,8 @@ import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
 import { makeZoneHud } from './ui/zone';
-import { linkSearchToFlight, type Flyer } from './ui/flyLink';
+import { linkSearchToFlight, kindFromId, flightKind, type Flyer } from './ui/flyLink';
+import { createTour } from './ui/tour';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -101,7 +102,24 @@ const flyer: Flyer = {
 const flyToPick = linkSearchToFlight(flyer, showInfoById, undefined, () => now);
 // Deep links (#to=<id>): fly there once stars have loaded; each pick updates the URL.
 const recordPick = linkDeepLinks(flyToPick, starsReady);
-mountSearch((id) => { recordPick(id); flyToPick(id); }, false);
+// Grand Tour (Lumi): button flies outward through the scales; any manual pick stops it.
+const tourBtn = document.querySelector<HTMLButtonElement>('#tour');
+const tour = createTour({
+  fly(id) {
+    const k = kindFromId(id);
+    if (!k) return Promise.reject(new Error(`No layer kind for id: ${id}`));
+    return flyer.flyTo({ kind: flightKind(k), id, approach: 'orbit' }, now).promise;
+  },
+  onStop(id) { recordPick(id); showInfoById(id); },
+  onEnd() { tourBtn?.setAttribute('aria-pressed', 'false'); if (tourBtn) tourBtn.textContent = 'Grand Tour'; },
+});
+tourBtn?.addEventListener('click', () => {
+  if (tour.running) { tour.stop(); return; }
+  tourBtn.setAttribute('aria-pressed', 'true');
+  tourBtn.textContent = 'Stop tour';
+  tour.start();
+});
+mountSearch((id) => { tour.stop(); recordPick(id); flyToPick(id); }, false);
 
 // ---- simple navigation: wheel = log zoom toward target, drag = orbit ---------
 const tmpTarget = new Float64Array(3);
