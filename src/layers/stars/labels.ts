@@ -10,6 +10,13 @@ const PC_TO_LY = 3.26156;
 const LABEL_SCALE = 0.025;
 const COLLISION_PADDING_PX = 7;
 
+type Rect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
 type StarLabel = {
   row: HygRow;
   sprite: THREE.Sprite;
@@ -17,13 +24,7 @@ type StarLabel = {
   texture: THREE.CanvasTexture;
   position: Float64Array;
   textFraction: number;
-};
-
-type Rect = {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
+  rect: Rect;
 };
 
 function overlaps(a: Rect, b: Rect): boolean {
@@ -45,6 +46,24 @@ export class StellarLabels {
 
   private readonly labels: StarLabel[] = [];
   private readonly occupied: Rect[] = [];
+
+  private static readonly EXCLUSION_IDS = [
+    'search',
+    'info',
+    'help',
+    'help-btn',
+    'constellations-btn',
+    'zone',
+    'tour',
+    'scale',
+  ] as const;
+
+  private readonly exclusions: Rect[] = Array.from(
+    { length: StellarLabels.EXCLUSION_IDS.length },
+    () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
+  );
+
+  private exclusionCount = 0;
 
   private readonly scratch = new THREE.Vector3();
   private readonly cameraSpace = new THREE.Vector3();
@@ -119,6 +138,7 @@ export class StellarLabels {
         material,
         texture,
         textFraction,
+        rect: { left: 0, top: 0, right: 0, bottom: 0 },
         position: new Float64Array([
           row[1], row[2], row[3],
         ]),
@@ -138,10 +158,39 @@ export class StellarLabels {
     const active = opacity > 0.001;
 
     const cam = this.camera.three;
-    const viewportWidth = document.documentElement.clientWidth;
-    const viewportHeight = document.documentElement.clientHeight;
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      '#app canvas',
+    );
+    const viewport = canvas?.getBoundingClientRect();
+
+    const viewportLeft = viewport?.left ?? 0;
+    const viewportTop = viewport?.top ?? 0;
+    const viewportWidth =
+      viewport?.width ?? document.documentElement.clientWidth;
+    const viewportHeight =
+      viewport?.height ?? document.documentElement.clientHeight;
 
     this.occupied.length = 0;
+    this.exclusionCount = 0;
+
+    for (const id of StellarLabels.EXCLUSION_IDS) {
+      const el = document.getElementById(id);
+
+      if (
+        !el ||
+        el.hidden ||
+        getComputedStyle(el).display === 'none'
+      ) continue;
+
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+
+      const zone = this.exclusions[this.exclusionCount++];
+      zone.left = r.left;
+      zone.top = r.top;
+      zone.right = r.right;
+      zone.bottom = r.bottom;
+    }
 
     for (const label of this.labels) {
       const { sprite, material, position } = label;
@@ -186,8 +235,10 @@ export class StellarLabels {
         Math.abs(p.y) > 1.1
       ) continue;
 
-      const x = (p.x + 1) * viewportWidth * 0.5;
-      const y = (1 - p.y) * viewportHeight * 0.5;
+      const x =
+        viewportLeft + (p.x + 1) * viewportWidth * 0.5;
+      const y =
+        viewportTop + (1 - p.y) * viewportHeight * 0.5;
 
       const heightPx =
         height *
@@ -201,19 +252,29 @@ export class StellarLabels {
       const pad = COLLISION_PADDING_PX;
 
       // Sprite anchor is bottom-center.
-      const rect: Rect = {
-        left: x - widthPx / 2 - pad,
-        right: x + widthPx / 2 + pad,
-        top: y - heightPx - pad,
-        bottom: y + pad,
-      };
+      const rect = label.rect;
+      rect.left = x - widthPx / 2 - pad;
+      rect.right = x + widthPx / 2 + pad;
+      rect.top = y - heightPx - pad;
+      rect.bottom = y + pad;
 
       let blocked = false;
 
+      // Keep the brighter labels already accepted.
       for (const other of this.occupied) {
         if (overlaps(rect, other)) {
           blocked = true;
           break;
+        }
+      }
+
+      // Prevent labels from overlapping HUD and controls.
+      if (!blocked) {
+        for (let i = 0; i < this.exclusionCount; i++) {
+          if (overlaps(rect, this.exclusions[i])) {
+            blocked = true;
+            break;
+          }
         }
       }
 
