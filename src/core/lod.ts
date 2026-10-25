@@ -7,7 +7,8 @@
 // different anchor than tier 1 — that would make tier selection depend on
 // itself (tier → anchor → distance → tier), and it oscillates at boundaries.
 // If a layer wants "near camera objects while far from Sun", it sets basis
-// 'nearer', which takes Math.min(anchorDistance, focusDistance) every frame.
+// 'nearer', which takes Math.min(anchorDistance, focusDistance) every frame
+// that a focus target exists.
 
 import type { FrameApi, FramedPoint } from './camera';
 
@@ -40,12 +41,17 @@ export interface LodState {
   /** Active tier index (0 = nearest), or -1 if the layer is LOD-inactive. */
   readonly level: number;
   /**
-   * Weight of the ACTIVE tier (0..1). The layer draws tier `level` at
-   * `crossfade` and, if it exists, tier `level + 1` at `1 - crossfade`.
-   * The last tier's fade-out weight is captured by the layer drawing it at
-   * `1 - crossfade` of the tier *above* it. A layer that only ever draws the
-   * active tier goes dark in the hysteresis band (1.0×..1.2× maxDistance) —
-   * do not implement it that way; see computeCrossfade docs.
+   * Weight of the ACTIVE tier. The layer draws tier `level` at `crossfade`
+   * and, if it exists, tier `level + 1` at `1 - crossfade`.
+   *
+   * The last tier (no `level + 1` to pair with) simply fades out by its own
+   * crossfade going to 0 across [(1 - crossfadeRatio) × maxDistance,
+   * maxDistance]. An Infinity last tier never fades (crossfade always 1).
+   *
+   * Note: in the hysteresis band (1.0×..1.2× maxDistance), the level is
+   * *held* by hysteresis while crossfade is at 0 — the layer should be
+   * showing tier `level + 1` at 1.0 weight by then. A layer that only ever
+   * draws the active tier goes dark in that band; do not implement it so.
    */
   readonly crossfade: number;
   /** 0..1 normalized budget share across active layers. */
@@ -63,7 +69,9 @@ export interface LodState {
   /**
    * Which basis produced focusDistance. "anchor" = layer.defaultAnchor,
    * "focus" = getFocusDistance() with no anchor, "frame-origin" = fallback
-   * when no target and no anchor. null only when level === -1 (LOD-inactive).
+   * when no target and no anchor. Null only when the layer has no lodTiers
+   * or is currently LOD-inactive (level === -1); whenever level >= 0,
+   * distanceBasis is set.
    */
   readonly distanceBasis: 'anchor' | 'focus' | 'frame-origin' | null;
   /** Whether hysteresis held the level at its previous value this frame. */
@@ -140,8 +148,11 @@ const targetScratch = new Float64Array(3);
  * Writes focusDistance, cameraFocusDistance, distanceBasis.
  *
  * 'anchor' requires layer.defaultAnchor; without one it behaves like 'focus'.
- * 'nearer' takes Math.min(anchorDistance, focusDistance) per frame — this is
- * stable (min of two smooth functions of camera position) and does not loop.
+ * 'nearer' takes Math.min(anchorDistance, focusDistance) — but ONLY when a
+ * focus target exists. With no target, getFocusDistance() falls back to
+ * distance-to-Sun, so 'nearer' would collapse to the anchor distance anyway;
+ * we gate explicitly so the behavior is obvious and does not depend on the
+ * current fallback semantics of getFocusDistance().
  */
 export function resolveLayerDistance(
   basis: DistanceBasis,
@@ -161,7 +172,7 @@ export function resolveLayerDistance(
   }
 
   const a = api.getFocusDistance(anchor);
-  if (basis === 'nearer' && focus < a) {
+  if (basis === 'nearer' && hasTarget && focus < a) {
     state.focusDistance = focus;
     state.distanceBasis = focusBasis;
   } else {
@@ -203,11 +214,18 @@ export function selectTierInto(
  * Weight of the ACTIVE tier at the given distance.
  *
  * Contract: the layer draws tier `level` at `crossfade` and tier `level + 1`
- * (if it exists) at `1 - crossfade`. This is what makes the hysteresis band
- * visible: between 1.0× and 1.2× maxDistance, the level is *held* by
- * hysteresis (does not demote), but crossfade drops toward 0 — so the layer
- * fades the current tier out while fading the next tier in. A layer that only
- * draws the active tier goes dark in that band; do not implement it that way.
+ * (if it exists) at `1 - crossfade`.
+ *
+ * The active tier fades from 1 to 0 across
+ *   [(1 - crossfadeRatio) × maxDistance,  maxDistance].
+ *
+ * In the hysteresis band (1.0×..1.2× maxDistance), the active tier's
+ * crossfade is 0 — the level is *held* by hysteresis, but its weight is 0,
+ * and the layer should be showing the next tier at full weight. A layer that
+ * draws only the active tier goes dark in that band; do not implement it so.
+ *
+ * The last tier has no next tier to pair with, so it simply fades out by its
+ * own crossfade going to 0 across the same interval.
  *
  * An Infinity maxDistance (always-on last tier) never fades — returns 1.
  */
