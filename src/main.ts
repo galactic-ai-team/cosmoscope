@@ -26,6 +26,7 @@ import { mountHelp } from './ui/help';
 import { mountConstellationToggle } from './ui/constellations';
 import { mountHomeKey } from './ui/home';
 import { orbitUpFor } from './ui/orbitUp';
+import { chooseFrame } from './ui/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -81,7 +82,11 @@ registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
 // only if it already exists. Missing HYG JSON is not fatal: the layer still resolves the Sun.
-const stars = makeStarsLayer(scene, camera);
+const stars = makeStarsLayer(
+  scene,
+  camera,
+  renderer.domElement,
+);
 const starsReady = stars.load(HYG_URL)
   .then((n) => console.info(`stars: ${n} HYG stars loaded`))
   .catch((err) => console.warn(`stars: HYG data unavailable (${HYG_URL}), running without the star field`, err))
@@ -172,6 +177,10 @@ renderer.setAnimationLoop((ms: number) => {
   flight.update(now);   // Dee: moves the camera along the log-space path
   controls.enabled = !flight.active; // Claude: controls stand down mid-flight
   controls.update(dt);  // Claude: eased orbit/zoom around the target
+  if (!flight.active) {  // Lumi: helio <-> galactic by distance from the Sun (exact rebase)
+    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT), camera.getTarget(hudTarget)?.frame ?? null);
+    if (want !== camera.getFrameId()) camera.rebaseTo(want); // orbit axis stays the target's
+  }
   camera.update();      // Claude: sync the three.js puppet before layers read it
   registry.update(dt);  // Dee: crossfades + per-layer update (camera-relative positions)
 
