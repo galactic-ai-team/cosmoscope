@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { METERS } from '../../src/core/frames';
-import { chooseFrame, ENTER_HELIO_M, LEAVE_HELIO_M } from '../../src/ui/frameSwitch';
+import { chooseFrame, ENTER_HELIO_M, LEAVE_HELIO_M } from '../../src/core/frameSwitch';
 
 const AU = METERS.au;
 
