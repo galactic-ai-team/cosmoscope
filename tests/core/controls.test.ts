@@ -131,6 +131,33 @@ describe('CosmoControls behaviour', () => {
     controls.zoom(1);
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it('reports input while disabled, and a listener can re-enable so that input applies', () => {
+    const { cam, controls } = rig();
+    controls.enabled = false; // mid-flight
+    let flying = true;
+    controls.onUserInput(() => {
+      if (flying) {
+        flying = false; // flight.cancelFlight()
+        controls.enabled = true;
+      }
+    });
+    controls.zoom(1);
+    controls.update(1 / 60);
+    expect(flying).toBe(false);
+    expect(len(offset(cam))).toBeCloseTo(10 * Math.exp(0.15), 6); // the grabbing input applied
+  });
+
+  it('a pointer press alone counts as user input, even while disabled', () => {
+    const { controls } = rig();
+    controls.enabled = false;
+    const spy = vi.fn();
+    controls.onUserInput(spy);
+    const el = new EventTarget();
+    controls.attach(el);
+    el.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerId: 1, clientX: 0, clientY: 0 }));
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('CosmoControls DOM binding', () => {
