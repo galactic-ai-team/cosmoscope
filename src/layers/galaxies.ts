@@ -27,6 +27,45 @@ const MLY_M = LY_M * 1e6; // metres per million light-years
 const LY_PER_PC = 3.26156; // light-years per parsec
 const PC_PER_MLY = 1e6 / LY_PER_PC; // parsecs per million light-years
 
+// Approximate isophotal diameters in light-years — FRAMING ONLY, not
+// catalog measurements. approachRadius below is the body RADIUS, so an
+// orbit flight (×3 in FlyToController) lands at 3× radius = 1.5×
+// diameter, and a flyby (×8) at 4× diameter. The old 0.2× Sun-distance
+// rule is gone: it made distant bodies stop absurdly far out and near
+// ones inconsistently close.
+const DIAMETER_LY: Record<string, number> = {
+  'galaxy:messier:M31': 220_000,
+  'galaxy:messier:M32': 8_000,
+  'galaxy:messier:M110': 15_000,
+  'galaxy:messier:M33': 55_000,
+  'galaxy:messier:M51': 76_000,
+  'galaxy:messier:M81': 90_000,
+  'galaxy:messier:M82': 37_000,
+  'galaxy:messier:M87': 120_000,
+  'galaxy:messier:M101': 170_000,
+  'galaxy:messier:M104': 130_000,
+  'galaxy:common:milkyway': 100_000,
+  'cluster:common:virgo': 16_000_000,
+  'cluster:abell:1656': 20_000_000,
+  'cluster:abell:S373': 6_000_000,
+  'galaxy:pgc:17223': 14_000,
+  'galaxy:pgc:3085': 7_000,
+  'galaxy:pgc:4689212': 10_000,
+  'galaxy:pgc:10074': 9_300,
+  'galaxy:pgc:3589': 3_000,
+  'galaxy:pgc:19441': 2_000,
+  'galaxy:pgc:88608': 8_000,
+  'galaxy:pgc:29488': 2_000,
+  'galaxy:pgc:34176': 3_000,
+  'galaxy:pgc:54074': 2_000,
+  'galaxy:pgc:60095': 3_000,
+  'galaxy:pgc:2666': 2_000,
+  'galaxy:pgc:4601': 2_000,
+  'galaxy:pgc:2121': 3_000,
+  'galaxy:pgc:2004': 9_000,
+  'galaxy:pgc:2329': 10_600,
+};
+
 // Lane constants from Claude. GC drives the Milky Way center entry
 // below; NGP is the Milky Way disk-plane normal for the band file.
 export const GALACTIC_CENTER = {
@@ -108,6 +147,8 @@ const BODIES: BodyDatum[] = [
   { id: 'galaxy:pgc:2666', name: 'Andromeda I', aliases: ['And I'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Andromeda', raDeg: 11.42, decDeg: 38.04, distanceMly: 2.40, blurb: 'M31\'s closest dwarf spheroidal companion.' },
   { id: 'galaxy:pgc:4601', name: 'Andromeda II', aliases: ['And II'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Pisces', raDeg: 19.12, decDeg: 33.42, distanceMly: 2.22, blurb: 'An M31 satellite with an unusually extended star-formation history.' },
   { id: 'galaxy:pgc:2121', name: 'Andromeda III', aliases: ['And III'], kind: 'galaxy', type: 'Dwarf spheroidal (dSph)', constellation: 'Andromeda', raDeg: 8.89, decDeg: 36.50, distanceMly: 2.44, blurb: 'A faint M31 companion, found on the same 1970 plates as And I and II.' },
+{ id: 'galaxy:pgc:2004', name: 'NGC 147', aliases: ['DDO 3', 'UGC 326', 'Caldwell 17'], kind: 'galaxy', type: 'Dwarf elliptical (dE5)', constellation: 'Cassiopeia', raDeg: 8.30, decDeg: 48.51, distanceMly: 2.38, blurb: 'M31\'s elongated companion — gravitationally bound to NGC 185, a degree away.' },
+{ id: 'galaxy:pgc:2329', name: 'NGC 185', aliases: ['UGC 396', 'Caldwell 18'], kind: 'galaxy', type: 'Dwarf spheroidal (dE3)', constellation: 'Cassiopeia', raDeg: 9.74, decDeg: 48.34, distanceMly: 2.05, blurb: 'The Local Group\'s only known Seyfert — a dwarf with an active nucleus and young star clusters.' },
 ];
 
 // Catalog entries for Lumi's search + info panels. distanceM stays metres
@@ -182,6 +223,9 @@ function resolveGalaxyTarget(id: string): ResolvedTarget | null {
   const i = byId.get(id);
   if (i === undefined) return null;
   const b = BODIES[i];
+  // Body radius in parsecs. Unknown bodies fall back to the old rule
+  // (40% of Sun-distance as diameter).
+  const diameterLy = DIAMETER_LY[id] ?? b.distanceMly * 1e6 * 0.4;
   return {
     frameId: 'galactic',
     worldPos: new Float64Array([
@@ -189,8 +233,7 @@ function resolveGalaxyTarget(id: string): ResolvedTarget | null {
       positionsPc[i * 3 + 1],
       positionsPc[i * 3 + 2],
     ]),
-    // Flyby framing: stop at 20% of the body's distance.
-    approachRadius: b.distanceMly * PC_PER_MLY * 0.2,
+    approachRadius: diameterLy / 2 / LY_PER_PC,
   };
 }
 
