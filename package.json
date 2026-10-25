@@ -1,0 +1,10 @@
+{
+  "name": "cosmoscope",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Cosmoscope: an interactive 3D map of the universe built by the Galactic AI Team.",
+  "scripts": { "dev": "vite", "build": "tsc --noEmit && vite build", "preview": "vite preview" },
+  "dependencies": { "three": "^0.186.1" },
+  "devDependencies": { "@types/three": "^0.186.0", "typescript": "^7.0.2", "vite": "^8.3.5" }
+}
