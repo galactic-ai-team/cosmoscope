@@ -359,6 +359,11 @@ export class StellarNeighborhood implements ScaleLayer {
     this.mesh.raycast = () => {};
 
     this.object3D.add(this.mesh);
+
+    // The JSON may finish loading after Dee's registry called enter().
+    if (this.active && !this.object3D.parent) {
+      this.scene.add(this.object3D);
+    }
   }
 }
 
