@@ -32,24 +32,28 @@ export interface ScaleLayer {
   enter(api: FrameApi): void;
   exit(): void;
   /**
-   * Called every frame while active.
-   * `distance` is camera-focus distance in metres (preserved for backward compat).
-   * `lod` is the LOD snapshot for this layer — undefined if the layer has no
-   * lodTiers. Do NOT retain the lod reference across frames (reused record).
+   * Called every frame while frame-active — including when LOD level is -1,
+   * so a fast flight past a tier boundary can still hide the layer. Never
+   * called for frame-inactive layers.
+   *
+   * `distanceMetres` is camera→focus distance in METRES, independent of the
+   * camera's current frame. Use it, not frame units, for any distance math.
+   *
+   * `lod` is the LOD snapshot for this layer. Always defined (see LodState
+   * for the isTiered contract). Do NOT retain the reference across frames.
    */
-  update(dt: number, distance: number, api: FrameApi, lod?: Readonly<LodState>): void;
+  update(dt: number, distanceMetres: number, api: FrameApi, lod: Readonly<LodState>): void;
   renderBudget: number;
   resolveTarget(id: string): ResolvedTarget | null;
   lodLevel?(): number;
-  /** Optional LOD tier table. If absent, layer always draws (backward compat). */
+  /** Optional LOD tier table. If absent, layer is treated as always-on tier. */
   lodTiers?: LodTier[];
   /**
    * Distance basis for tier selection. One basis per layer, never per tier.
    *   'anchor' — measure against defaultAnchor; no anchor = behaves like 'focus'.
    *   'focus'  — always camera→focus (getFocusDistance with no argument).
-   *   'nearer' — Math.min(anchorDistance, focusDistance); for layers that
-   *              want near-camera detail even when far from the anchor.
-   * Default 'anchor' (backward compat).
+   *   'nearer' — Math.min(anchorDistance, focusDistance).
+   * Default 'anchor'.
    */
   basis?: DistanceBasis;
   /** Anchor used by basis 'anchor' and 'nearer'. */
@@ -62,12 +66,17 @@ interface LayerEntry {
   opacity: number;
   /** Reused LodState backing for this layer. Never reallocated. */
   lod: MutableLodState;
+  /** Reused per-frame raw budget weight. */
+  rawBudget: number;
 }
 
 export class LayerRegistry {
   private entries = new Map<string, LayerEntry>();
   private api: FrameApi;
   private globalObjectCap: number;
+  /** Reused per-frame list of active layer entries. Never reallocated. */
+  private activeNow: LayerEntry[] = [];
+  /** Reused scratch for camera position reads in phase 3. */
 
   constructor(api: FrameApi, globalObjectCap = DEFAULT_GLOBAL_OBJECT_CAP) {
     this.api = api;
@@ -85,11 +94,14 @@ export class LayerRegistry {
     if (layer.lodTiers) {
       validateLodTiers(layer.lodTiers, layer.idPrefix);
     }
+    const lod = makeLodState();
+    lod.isTiered = !!layer.lodTiers;
     this.entries.set(layer.idPrefix, {
       layer,
       active: false,
       opacity: 0,
-      lod: makeLodState(),
+      lod,
+      rawBudget: 1.0,
     });
   }
 
@@ -108,12 +120,14 @@ export class LayerRegistry {
     const frame = this.api.getFrameId();
     const step = crossfadeSeconds > 0 ? dt / crossfadeSeconds : 1;
 
-    interface ActiveEntry {
-      entry: LayerEntry;
-      rawBudget: number;
-    }
-    const activeNow: ActiveEntry[] = [];
+    // Camera-focus distance in METRES, same for every layer this frame.
+    // getFocusDistance() returns metres regardless of the camera's frame,
+    // so a frame rebase does not change this value.
+    const focusMetres = this.api.getFocusDistance();
 
+    this.activeNow.length = 0;
+
+    // --- Phase 1: frame membership, opacity, LOD selection, raw budget.
     for (const entry of this.entries.values()) {
       const shouldBeActive = entry.layer.frames.includes(frame);
 
@@ -133,23 +147,27 @@ export class LayerRegistry {
         continue;
       }
 
+      // Skip only frame-inactive layers. Frame-active layers ALWAYS reach
+      // phase 3, even at LOD level -1, so they can hide themselves after a
+      // fast jump past a tier boundary.
       if (!entry.active) continue;
+
+      entry.lod.frameOpacity = entry.opacity;
+      entry.lod.cameraFocusDistance = focusMetres;
 
       const tiers = entry.layer.lodTiers;
       if (!tiers) {
-        // No LOD: always draw at full budget when active.
+        // Non-tiered: treated as always-on tier at full weight.
         entry.lod.level = -1;
         entry.lod.crossfade = 1;
-        entry.lod.budgetFrac = 0; // filled in phase 2
         entry.lod.focusDistance = 0;
-        entry.lod.cameraFocusDistance = 0;
         entry.lod.distanceBasis = null;
         entry.lod.heldByHysteresis = false;
-        activeNow.push({ entry, rawBudget: 1.0 });
+        entry.rawBudget = 1.0;
+        this.activeNow.push(entry);
         continue;
       }
 
-      // Resolve the layer's selection distance into entry.lod (no alloc).
       resolveLayerDistance(
         entry.layer.basis ?? 'anchor',
         entry.layer.defaultAnchor,
@@ -157,7 +175,6 @@ export class LayerRegistry {
         entry.lod,
       );
 
-      // Tier selection writes level + heldByHysteresis into entry.lod.
       selectTierInto(tiers, entry.lod.focusDistance, entry.lod);
 
       entry.lod.crossfade =
@@ -165,31 +182,28 @@ export class LayerRegistry {
           ? computeCrossfade(tiers[entry.lod.level], entry.lod.focusDistance)
           : 0;
 
-      if (entry.lod.level === -1) {
-        entry.lod.budgetFrac = 0;
-        entry.lod.distanceBasis = null;
-        continue;
-      }
-
-      activeNow.push({ entry, rawBudget: tiers[entry.lod.level].budgetFrac });
+      entry.rawBudget = entry.lod.level >= 0 ? tiers[entry.lod.level].budgetFrac : 0;
+      this.activeNow.push(entry);
     }
 
-    // Phase 2: normalize budgetFrac across active layers.
+    // --- Phase 2: normalize rawBudget across frame-active layers.
     let totalWeight = 0;
-    for (const { rawBudget } of activeNow) totalWeight += rawBudget;
+    for (const entry of this.activeNow) totalWeight += entry.rawBudget;
 
-    for (const { entry, rawBudget } of activeNow) {
-      entry.lod.budgetFrac = totalWeight > 0 ? rawBudget / totalWeight : 0;
+    for (const entry of this.activeNow) {
+      entry.lod.budgetFrac = totalWeight > 0 ? entry.rawBudget / totalWeight : 0;
     }
 
-    // Phase 3: call update() with the resolved LodState.
-    const pos = new Float64Array(3);
-    this.api.getCameraWorldPosition(this.api.getFrameId(), pos);
-    const focusDist = Math.hypot(pos[0], pos[1], pos[2]);
-
-    for (const { entry } of activeNow) {
-      entry.layer.update(dt, focusDist, this.api, entry.lod as Readonly<LodState>);
+    // --- Phase 3: call update() on every frame-active layer.
+    for (const entry of this.activeNow) {
+      entry.layer.update(
+        dt,
+        focusMetres,
+        this.api,
+        entry.lod as Readonly<LodState>,
+      );
     }
+
   }
 
   resolveTarget(id: string): ResolvedTarget | null {
