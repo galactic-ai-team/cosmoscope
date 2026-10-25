@@ -134,6 +134,7 @@ controls.attach(renderer.domElement);
 controls.onUserInput(() => {
   tour.stop();
   if (flight.flying) {
+    currentFlight?.cancel(); // harmless if it is the same flight (Claude's review)
     flight.cancelFlight();
     controls.enabled = true; // so this same input applies
   }
