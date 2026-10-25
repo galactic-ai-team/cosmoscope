@@ -47,13 +47,6 @@ export class StellarLabels {
   private readonly labels: StarLabel[] = [];
   private readonly occupied: Rect[] = [];
 
-  private readonly exclusions: Rect[] = Array.from(
-    { length: StellarLabels.EXCLUSION_IDS.length },
-    () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
-  );
-
-  private exclusionCount = 0;
-
   private static readonly EXCLUSION_IDS = [
     'search',
     'info',
@@ -64,6 +57,13 @@ export class StellarLabels {
     'tour',
     'scale',
   ] as const;
+
+  private readonly exclusions: Rect[] = Array.from(
+    { length: StellarLabels.EXCLUSION_IDS.length },
+    () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
+  );
+
+  private exclusionCount = 0;
 
   private readonly scratch = new THREE.Vector3();
   private readonly cameraSpace = new THREE.Vector3();
