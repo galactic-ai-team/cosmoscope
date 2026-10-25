@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
-import { FrameApi, CosmoCamera, toCameraRelative, layerScale, ORIGIN } from '../core/camera';
+import { FrameApi, CosmoCamera } from '../core/camera';
 import { FrameId } from '../core/frames';
 import { register, CatalogEntry } from '../catalog';
 
@@ -49,7 +49,7 @@ const PLANETS: PlanetData[] = [
     color: 0xc1440e, 
     moons: [
       { name: 'Phobos', id: 'moon:phobos', distance: 0.015, radius: 0.6, color: 0x887766, speed: 20.0 },
-      { name: 'Deimos', id: 'moon:deimos', distance: 0.04, radius: 0.4, color: 0x776655, speed: 15.0 }
+      { name: 'Deimos', id: 'moon:deimos', distance: 0.025, radius: 0.4, color: 0x776655, speed: 15.0 }
     ] 
   },
   { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomalyJ2000: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
@@ -59,6 +59,8 @@ const PLANETS: PlanetData[] = [
 ];
 
 export class SolarSystemLayer implements ScaleLayer {
+  public static readonly ORIGIN = new THREE.Vector3(0, 0, 0);
+
   public idPrefix = 'planet';
   public frames: FrameId[] = ['helio'];
   public minZoom = 1e3;
@@ -204,14 +206,17 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public update(dt: number): void {
-    // 1x real-time progression prevents orbital drift during camera flights
-    const timeScale = 1.0; 
-    this.daysSinceJ2000 += dt * timeScale;
+    // True real-time default: dt is in seconds, convert to fraction of a day (dt / 86400)
+    // Multiplied by a comfortable visualization factor (e.g., 500x) so orbital motion is visibly engaging
+    const timeScale = 500.0;
+    this.daysSinceJ2000 += (dt / 86400) * timeScale;
+
+    // Align container to camera relative origin and layer scale for floating-origin precision
+    this.camera.toCameraRelative(SolarSystemLayer.ORIGIN, 'helio', this.container.position);
+    this.container.scale.setScalar(this.camera.layerScale('helio'));
 
     if (this.sunMesh) {
-      this.sunMesh.rotation.y += dt * 0.05 * timeScale;
-      const sunRel = toCameraRelative(ORIGIN, this.camera.position, layerScale('helio'));
-      this.sunMesh.position.copy(sunRel);
+      this.sunMesh.rotation.y += dt * 0.05;
     }
 
     this.planetMeshes.forEach((item) => {
@@ -227,13 +232,13 @@ export class SolarSystemLayer implements ScaleLayer {
 
       item.worldPos.set(xAU, 0, zAU);
 
-      const relPos = toCameraRelative(item.worldPos, this.camera.position, layerScale('helio'));
-      item.mesh.position.copy(relPos);
-      item.mesh.rotation.y += dt * 0.5 * timeScale;
+      item.mesh.position.x = xAU;
+      item.mesh.position.z = zAU;
+      item.mesh.rotation.y += dt * 0.5;
 
       if (item.moons) {
         item.moons.forEach((moon) => {
-          moon.pivot.rotation.y += dt * moon.speed * 0.1 * timeScale;
+          moon.pivot.rotation.y += dt * moon.speed * 0.1;
         });
       }
     });
