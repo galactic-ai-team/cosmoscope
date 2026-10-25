@@ -1,55 +1,71 @@
 // src/core/lod.ts
-// LOD tier selection, hysteresis, and per-frame budget normalization.
-// Consumed by LayerRegistry (layers.ts) — computes a LodState per layer each
-// frame and hands it to ScaleLayer.update() as an optional 4th argument.
+// LOD distance-basis resolution, tier selection with hysteresis, and
+// crossfade weight. Consumed by LayerRegistry (layers.ts), which hands a
+// LodState to ScaleLayer.update() as an optional 4th argument.
+//
+// Design: ONE distance basis per layer, never per tier. Tier 0 cannot use a
+// different anchor than tier 1 — that would make tier selection depend on
+// itself (tier → anchor → distance → tier), and it oscillates at boundaries.
+// If a layer wants "near camera objects while far from Sun", it sets basis
+// 'nearer', which takes Math.min(anchorDistance, focusDistance) every frame.
 
 import type { FrameApi, FramedPoint } from './camera';
 
+/** How a layer measures distance for tier selection. One basis per layer. */
+export type DistanceBasis = 'anchor' | 'focus' | 'nearer';
+
 export interface LodTier {
-  /** Max distance (metres) at which this tier is eligible to draw. */
+  /**
+   * Max distance (metres) at which this tier is eligible to draw. The last
+   * tier may use Infinity for an always-eligible tier (drawn at crossfade 1,
+   * never fades out).
+   */
   maxDistance: number;
   /** Relative budget desire for this tier (0..1). Normalized across layers. */
   budgetFrac: number;
-  /** Ratio of maxDistance over which to fade in. Default 0.15. */
-  crossfadeRatio?: number;
   /**
-   * Anchor to measure distance from for this tier. Shape: { frame, position },
-   * where position is a Float64Array of length 3 in that frame.
-   * If omitted, uses the layer's defaultAnchor. If that's also omitted,
-   * uses camera focus. Per-tier override lets a layer mix anchors (e.g.
-   * stars: Sun-anchored coarse tiers, focus-anchored near tier for labels).
+   * Ratio of maxDistance over which to fade in. Default 0.15.
+   * See computeCrossfade for the paired-tier weight contract.
    */
-  anchor?: FramedPoint;
+  crossfadeRatio?: number;
 }
 
 /**
  * Read-only LOD snapshot for the current frame, one reused record per layer.
  *
  * IMPORTANT: the registry reuses one LodState object per layer across frames
- * and mutates it in place. Do NOT retain the reference across frames. If you
- * need to compare against last frame, copy the fields you care about.
+ * and mutates it in place. Do NOT retain the reference across frames.
  */
 export interface LodState {
   /** Active tier index (0 = nearest), or -1 if the layer is LOD-inactive. */
   readonly level: number;
-  /** 0..1 fade-in opacity for the active tier. */
+  /**
+   * Weight of the ACTIVE tier (0..1). The layer draws tier `level` at
+   * `crossfade` and, if it exists, tier `level + 1` at `1 - crossfade`.
+   * The last tier's fade-out weight is captured by the layer drawing it at
+   * `1 - crossfade` of the tier *above* it. A layer that only ever draws the
+   * active tier goes dark in the hysteresis band (1.0×..1.2× maxDistance) —
+   * do not implement it that way; see computeCrossfade docs.
+   */
   readonly crossfade: number;
   /** 0..1 normalized budget share across active layers. */
   readonly budgetFrac: number;
-  /** Distance (metres) used for tier selection this frame (the tier's anchor). */
+  /**
+   * Distance (metres) used for tier selection this frame, resolved per the
+   * layer's DistanceBasis.
+   */
   readonly focusDistance: number;
   /**
-   * Always the camera→focus distance, regardless of which anchor drove tier
-   * selection. Lets a layer override its own near-tier behavior — e.g. stars
-   * drawing an extra near-camera tier even when Sun-anchored tiers say "far".
+   * Always the camera→focus distance, regardless of which basis drove tier
+   * selection. Lets a layer override its own near-tier behavior.
    */
   readonly cameraFocusDistance: number;
   /**
-   * Which anchor produced focusDistance. "tier" = tier's own anchor,
-   * "layer-default" = layer.defaultAnchor, "camera-focus" = FocusApi.getFocusDistance(),
-   * "frame-origin" = fallback. null only when level === -1 (LOD-inactive).
+   * Which basis produced focusDistance. "anchor" = layer.defaultAnchor,
+   * "focus" = getFocusDistance() with no anchor, "frame-origin" = fallback
+   * when no target and no anchor. null only when level === -1 (LOD-inactive).
    */
-  readonly focusId: 'tier' | 'layer-default' | 'camera-focus' | 'frame-origin' | null;
+  readonly distanceBasis: 'anchor' | 'focus' | 'frame-origin' | null;
   /** Whether hysteresis held the level at its previous value this frame. */
   readonly heldByHysteresis: boolean;
 }
@@ -66,7 +82,7 @@ export interface MutableLodState {
   budgetFrac: number;
   focusDistance: number;
   cameraFocusDistance: number;
-  focusId: LodState['focusId'];
+  distanceBasis: LodState['distanceBasis'];
   heldByHysteresis: boolean;
 }
 
@@ -77,7 +93,7 @@ export function makeLodState(): MutableLodState {
     budgetFrac: 0,
     focusDistance: Infinity,
     cameraFocusDistance: Infinity,
-    focusId: null,
+    distanceBasis: null,
     heldByHysteresis: false,
   };
 }
@@ -89,7 +105,13 @@ export function validateLodTiers(tiers: LodTier[], idPrefix: string): void {
   let prevMax = -Infinity;
   for (let i = 0; i < tiers.length; i++) {
     const t = tiers[i];
-    if (!Number.isFinite(t.maxDistance) || t.maxDistance <= prevMax) {
+    const isLast = i === tiers.length - 1;
+    if (!Number.isFinite(t.maxDistance) && !(isLast && t.maxDistance === Infinity)) {
+      throw new Error(
+        `Layer "${idPrefix}": lodTiers[${i}].maxDistance must be finite (except last tier may be Infinity)`,
+      );
+    }
+    if (t.maxDistance <= prevMax) {
       throw new Error(
         `Layer "${idPrefix}": lodTiers[${i}].maxDistance must be strictly ascending (${t.maxDistance} <= ${prevMax})`,
       );
@@ -106,80 +128,94 @@ export function validateLodTiers(tiers: LodTier[], idPrefix: string): void {
         `Layer "${idPrefix}": lodTiers[${i}].crossfadeRatio must be in (0,1) (${cr})`,
       );
     }
-    if (t.anchor !== undefined) {
-      if (
-        typeof t.anchor !== 'object' ||
-        t.anchor === null ||
-        typeof t.anchor.frame !== 'string' ||
-        !(t.anchor.position instanceof Float64Array) ||
-        t.anchor.position.length !== 3
-      ) {
-        throw new Error(
-          `Layer "${idPrefix}": lodTiers[${i}].anchor must be { frame, position: Float64Array(3) }`,
-        );
-      }
-    }
+  }
+}
+
+// Reused scratch, module scope — resolveLayerDistance writes into this to
+// detect whether a focus target exists without allocating.
+const targetScratch = new Float64Array(3);
+
+/**
+ * Resolve the layer's selection distance into `state`. No allocation.
+ * Writes focusDistance, cameraFocusDistance, distanceBasis.
+ *
+ * 'anchor' requires layer.defaultAnchor; without one it behaves like 'focus'.
+ * 'nearer' takes Math.min(anchorDistance, focusDistance) per frame — this is
+ * stable (min of two smooth functions of camera position) and does not loop.
+ */
+export function resolveLayerDistance(
+  basis: DistanceBasis,
+  anchor: FramedPoint | undefined,
+  api: FrameApi,
+  state: MutableLodState,
+): void {
+  const hasTarget = api.getTargetPosition(undefined, targetScratch) !== null;
+  const focus = api.getFocusDistance();
+  state.cameraFocusDistance = focus;
+  const focusBasis: LodState['distanceBasis'] = hasTarget ? 'focus' : 'frame-origin';
+
+  if (!anchor || basis === 'focus') {
+    state.focusDistance = focus;
+    state.distanceBasis = focusBasis;
+    return;
+  }
+
+  const a = api.getFocusDistance(anchor);
+  if (basis === 'nearer' && focus < a) {
+    state.focusDistance = focus;
+    state.distanceBasis = focusBasis;
+  } else {
+    state.focusDistance = a;
+    state.distanceBasis = 'anchor';
   }
 }
 
 /**
- * Pure tier math. Takes a distance already resolved against the appropriate
- * anchor; does NOT touch FrameApi or anchors — that's the registry's job.
- *
- * Respects hysteresis: to move UP (nearer, higher detail), distance must be
- * <= tier.maxDistance; to move DOWN (farther, lower detail), distance must
- * exceed tier.maxDistance * HYSTERESIS_RATIO.
+ * Tier selection with hysteresis, writing into `state` (no allocation).
+ * Reads state.level as the previous level; writes state.level and
+ * state.heldByHysteresis.
  */
-export function selectTier(
+export function selectTierInto(
   tiers: LodTier[],
   distance: number,
-  currentLevel: number,
-): { level: number; heldByHysteresis: boolean } {
-  const prevLevel = currentLevel;
+  state: MutableLodState,
+): void {
+  const prev = state.level;
   const prevMax =
-    prevLevel >= 0 && prevLevel < tiers.length
-      ? tiers[prevLevel].maxDistance
-      : Infinity;
+    prev >= 0 && prev < tiers.length ? tiers[prev].maxDistance : Infinity;
 
-  if (prevLevel >= 0 && distance > prevMax && distance <= prevMax * HYSTERESIS_RATIO) {
-    return { level: prevLevel, heldByHysteresis: true };
+  if (prev >= 0 && distance > prevMax && distance <= prevMax * HYSTERESIS_RATIO) {
+    state.heldByHysteresis = true;
+    return;
   }
 
+  state.heldByHysteresis = false;
   for (let i = 0; i < tiers.length; i++) {
     if (distance <= tiers[i].maxDistance) {
-      return { level: i, heldByHysteresis: false };
+      state.level = i;
+      return;
     }
   }
-  return { level: -1, heldByHysteresis: false };
+  state.level = -1;
 }
 
-/** Compute crossfade opacity for a given level and distance. */
+/**
+ * Weight of the ACTIVE tier at the given distance.
+ *
+ * Contract: the layer draws tier `level` at `crossfade` and tier `level + 1`
+ * (if it exists) at `1 - crossfade`. This is what makes the hysteresis band
+ * visible: between 1.0× and 1.2× maxDistance, the level is *held* by
+ * hysteresis (does not demote), but crossfade drops toward 0 — so the layer
+ * fades the current tier out while fading the next tier in. A layer that only
+ * draws the active tier goes dark in that band; do not implement it that way.
+ *
+ * An Infinity maxDistance (always-on last tier) never fades — returns 1.
+ */
 export function computeCrossfade(tier: LodTier, distance: number): number {
+  if (tier.maxDistance === Infinity) return 1;
   const fadeInDist = tier.maxDistance * (tier.crossfadeRatio ?? DEFAULT_CROSSFADE_RATIO);
   const lowEdge = tier.maxDistance - fadeInDist;
   if (distance <= lowEdge) return 1;
   if (distance >= tier.maxDistance) return 0;
   return (tier.maxDistance - distance) / fadeInDist;
-}
-
-/**
- * Resolve the tier's anchor distance and focusId. Called by the registry
- * before selectTier; selectTier itself stays pure.
- */
-export function resolveTierDistance(
-  tier: LodTier,
-  layerDefaultAnchor: FramedPoint | undefined,
-  api: FrameApi,
-): { distance: number; focusId: LodState['focusId'] } {
-  if (tier.anchor) {
-    return { distance: api.getFocusDistance(tier.anchor), focusId: 'tier' };
-  }
-  if (layerDefaultAnchor) {
-    return { distance: api.getFocusDistance(layerDefaultAnchor), focusId: 'layer-default' };
-  }
-  // getFocusDistance() with no anchor falls back to frame-origin distance
-  // today; once Claude implements orbit-target / flight-target focus, this
-  // will return camera focus automatically. focusId documents the current
-  // contract, not a permanent guarantee.
-  return { distance: api.getFocusDistance(), focusId: 'camera-focus' };
 }
