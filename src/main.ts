@@ -191,3 +191,4 @@ renderer.setAnimationLoop((ms: number) => {
 mountHelp();
 // Constellation toggle (Lumi, GPT-6's handoff): C key or top-right button.
 mountConstellationToggle((mode) => stars.setConstellationMode(mode));
+stars.startLabelExclusionCache(document);

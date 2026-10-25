@@ -203,6 +203,12 @@ export class StellarNeighborhood implements ScaleLayer {
     this.constellations.setMode(mode);
   }
 
+  startLabelExclusionCache(
+    doc: Document = document,
+  ): void {
+    this.labels.startExclusionCache(doc);
+  }
+
   /** Removes the star field without destroying its data. */
   exit(): void {
     this.active = false;
