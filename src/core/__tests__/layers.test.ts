@@ -160,12 +160,11 @@ function makeFocusOnlyGalaxyLayer(
 
 describe('LayerRegistry — LOD invariants', () => {
   it('cameraFocusDistance always equals api.getFocusDistance() regardless of tier anchor', () => {
-    // Camera 1e19 m from origin (deep in tier 2 of the star layer, which uses
-    // Sun anchor = origin). But focus point is 100 m from camera — so
-    // cameraFocusDistance should be ~100, and tier selection distance should
-    // be ~1e19.
-    const api = makeFakeApi([1e19, 0, 0]);
-    api.focusPoint[0] = 1e19 + 100;
+    // Camera at 1e10 m from origin — well inside float64 exact-integer range,
+    // so adding 100 to compute the focus point doesn't lose precision.
+    // Tier selection is still Sun-anchored: 1e10 << tier0.maxDistance (1e17).
+    const api = makeFakeApi([1e10, 0, 0]);
+    api.focusPoint[0] = 1e10 + 100;
 
     const observed: { lod?: LodState; called: boolean } = { called: false };
     const registry = new LayerRegistry(api);
@@ -177,8 +176,8 @@ describe('LayerRegistry — LOD invariants', () => {
     expect(observed.lod).toBeDefined();
     const lod = observed.lod!;
 
-    // Tier selection distance is Sun-anchored (1e19).
-    expect(lod.focusDistance).toBeCloseTo(1e19, -16); // rough
+    // Tier selection distance is Sun-anchored (~1e10).
+    expect(lod.focusDistance).toBeCloseTo(1e10, -5);
     expect(lod.focusId).toBe('layer-default');
 
     // cameraFocusDistance is always camera→focus, regardless of the above.
