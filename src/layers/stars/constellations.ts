@@ -58,6 +58,9 @@ const PATTERNS: readonly Pattern[] = [
   },
 ];
 
+/** Lumi's toggle: 'auto' keeps GPT-6's 30-100 ly fade, 'on' always shows, 'off' hides. */
+export type ConstellationMode = 'auto' | 'on' | 'off';
+
 const FADE_START_LY = 30;
 const FADE_END_LY = 100;
 
@@ -88,6 +91,8 @@ export class StellarConstellations {
     depthTest: true,
     toneMapped: false,
   });
+
+  private mode: ConstellationMode = 'auto';
 
   private readonly scratchA = new THREE.Vector3();
   private readonly scratchB = new THREE.Vector3();
@@ -165,8 +170,27 @@ export class StellarConstellations {
     this.object3D.add(this.lines);
   }
 
+  /** Lumi: Auto/On/Off toggle (GPT-6's handoff). Takes effect on the next update(). */
+  setMode(mode: ConstellationMode): void {
+    this.mode = mode;
+  }
+
+  getMode(): ConstellationMode {
+    return this.mode;
+  }
+
   update(cameraDistanceLy: number, starFade: number): void {
     if (!this.lines || !this.geometry) return;
+
+    // Lumi: 'off' hides; 'on' skips the fades below.
+    if (this.mode === 'off') {
+      this.lines.visible = false;
+      return;
+    }
+    if (this.mode === 'on') {
+      starFade = 1;
+      cameraDistanceLy = 0;
+    }
 
     const distanceFade = THREE.MathUtils.clamp(
       (FADE_END_LY - cameraDistanceLy) /

@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import type { FrameId } from '../../core/frames';
 import type { CosmoCamera, FrameApi } from '../../core/camera';
 import type { ScaleLayer, ResolvedTarget } from '../../core/layers';
-import { StellarConstellations } from './constellations';
+import { StellarConstellations, type ConstellationMode } from './constellations';
 import {
   loadHygStars,
   PARSEC_METRES,
@@ -195,6 +195,11 @@ export class StellarNeighborhood implements ScaleLayer {
     if (this.mesh && !this.object3D.parent) {
       this.scene.add(this.object3D);
     }
+  }
+
+  /** Lumi: constellation toggle (Auto/On/Off). */
+  setConstellationMode(mode: ConstellationMode): void {
+    this.constellations.setMode(mode);
   }
 
   /** Removes the star field without destroying its data. */
