@@ -2,7 +2,8 @@
 // ScaleLayer registry. Owns active-layer resolution, crossfades and LOD
 // selection on top of Claude's frame API (src/core/camera.ts).
 
-import type { FrameApi, FrameId } from './camera';
+import type { FrameApi } from './camera';
+import type { FrameId } from './frames';
 
 /** A resolvable searchable target, returned by a layer. */
 export interface ResolvedTarget {
@@ -14,28 +15,19 @@ export interface ResolvedTarget {
 }
 
 export interface ScaleLayer {
-  /** Stable prefix for searchable ids this layer owns, e.g. "star". */
   idPrefix: string;
-  /** Frames this layer draws in. Active when the camera's frame matches. */
   frames: FrameId[];
-  /** Called when the layer becomes active. */
   enter(api: FrameApi): void;
-  /** Called when the layer leaves the active set. */
   exit(): void;
-  /** Called every frame while active. `distance` is camera distance in frame units. */
   update(dt: number, distance: number, api: FrameApi): void;
-  /** Max objects this layer may draw. Enforced by the registry. */
   renderBudget: number;
-  /** Resolve a searchable id owned by this layer, or null. */
   resolveTarget(id: string): ResolvedTarget | null;
-  /** Current LOD level the layer is drawing at, for HUD/debug. */
   lodLevel?(): number;
 }
 
 interface LayerEntry {
   layer: ScaleLayer;
   active: boolean;
-  /** 0..1 crossfade opacity, driven by registry at frame boundaries. */
   opacity: number;
 }
 
@@ -54,7 +46,6 @@ export class LayerRegistry {
     this.entries.set(layer.idPrefix, { layer, active: false, opacity: 0 });
   }
 
-  /** Layers that should be drawing in the current frame, with crossfade opacity. */
   activeLayers(): { layer: ScaleLayer; opacity: number }[] {
     const frame = this.api.getFrameId();
     const out: { layer: ScaleLayer; opacity: number }[] = [];
@@ -66,12 +57,6 @@ export class LayerRegistry {
     return out;
   }
 
-  /**
-   * Per-frame tick. Activates/deactivates layers by frame, advances
-   * crossfades, and drives each active layer's update with its camera
-   * distance. `crossfadeSeconds` is how long a boundary blend takes.
-   * `dt` should be clamped by the caller (main.ts clamps to 0.1).
-   */
   update(dt: number, crossfadeSeconds = 0.4): void {
     const frame = this.api.getFrameId();
     const step = crossfadeSeconds > 0 ? dt / crossfadeSeconds : 1;
@@ -103,10 +88,6 @@ export class LayerRegistry {
     }
   }
 
-  /**
-   * Resolve a searchable id to a target. Dispatches to the layer whose
-   * idPrefix matches the id's prefix. Returns null if no layer owns it.
-   */
   resolveTarget(id: string): ResolvedTarget | null {
     const prefix = id.split(':')[0];
     const entry = this.entries.get(prefix);
@@ -114,7 +95,6 @@ export class LayerRegistry {
     return entry.layer.resolveTarget(id);
   }
 
-  /** Total render budget across active layers. Used by HUD/debug. */
   totalActiveBudget(): number {
     let sum = 0;
     for (const e of this.activeLayers()) sum += e.layer.renderBudget;
