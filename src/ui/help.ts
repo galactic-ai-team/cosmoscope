@@ -15,7 +15,8 @@ export const HELP_ITEMS: readonly HelpItem[] = [
 ];
 
 /** True when a keydown should toggle help (ignores typing in inputs). */
-export function isHelpKey(key: string, targetTag?: string): boolean {
+export function isHelpKey(key: string, targetTag?: string, editable = false): boolean {
+  if (editable) return false; // contenteditable (GPT-6's review)
   if (targetTag && /^(INPUT|TEXTAREA|SELECT)$/i.test(targetTag)) return false;
   return key === '?';
 }
@@ -33,6 +34,7 @@ export function mountHelp(doc: Document = document): { toggle(open?: boolean): b
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Help');
   panel.hidden = true;
+  panel.tabIndex = -1;
   panel.style.cssText = 'position:fixed;z-index:20;top:50%;left:50%;transform:translate(-50%,-50%);'
     + 'background:#0b1024ee;border:1px solid #3a4a7a;border-radius:12px;padding:16px 20px;max-width:90vw;'
     + 'font-size:14px;line-height:1.5';
@@ -44,15 +46,25 @@ export function mountHelp(doc: Document = document): { toggle(open?: boolean): b
   btn.style.cssText = 'position:fixed;z-index:6;top:16px;right:16px;width:34px;height:34px;border-radius:50%;'
     + 'background:#0b1024cc;color:#dfe8ff;border:1px solid #3a4a7a;font-size:16px;cursor:pointer';
   doc.body.append(panel, btn);
+  let returnFocus: HTMLElement | null = null;
   const toggle = (open?: boolean): boolean => {
+    const wasOpen = !panel.hidden;
     panel.hidden = !(open ?? panel.hidden);
     btn.setAttribute('aria-expanded', String(!panel.hidden));
+    // Move focus into the dialog on open and restore it on close (GPT-6's review).
+    if (!wasOpen && !panel.hidden) {
+      returnFocus = doc.activeElement as HTMLElement | null;
+      panel.focus();
+    } else if (wasOpen && panel.hidden) {
+      returnFocus?.focus?.();
+      returnFocus = null;
+    }
     return !panel.hidden;
   };
   btn.addEventListener('click', () => toggle());
   doc.addEventListener('keydown', (ev) => {
-    const tag = (ev.target as Element | null)?.tagName;
-    if (isHelpKey(ev.key, tag)) { ev.preventDefault(); toggle(); }
+    const el = ev.target as HTMLElement | null;
+    if (isHelpKey(ev.key, el?.tagName, el?.isContentEditable === true)) { ev.preventDefault(); toggle(); }
     else if (ev.key === 'Escape' && !panel.hidden) toggle(false);
   });
   return { toggle };

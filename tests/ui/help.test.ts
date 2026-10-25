@@ -5,6 +5,7 @@ describe('help overlay', () => {
   it('toggles on ? but not while typing', () => {
     expect(isHelpKey('?')).toBe(true);
     expect(isHelpKey('?', 'DIV')).toBe(true);
+    expect(isHelpKey('?', 'DIV', true)).toBe(false); // contenteditable
     expect(isHelpKey('?', 'INPUT')).toBe(false);
     expect(isHelpKey('h')).toBe(false);
   });
