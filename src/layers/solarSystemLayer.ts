@@ -197,6 +197,7 @@ export class SolarSystemLayer implements ScaleLayer {
     });
 
     register(catalogEntries);
+    this.placePlanets();
   }
 
   public enter(_api: FrameApi): void {
@@ -217,6 +218,15 @@ export class SolarSystemLayer implements ScaleLayer {
       this.sunMesh.rotation.y += dt * 0.05;
     }
 
+    this.placePlanets(dt);
+  }
+
+  /**
+   * Kepler positions for the current clock (Lumi). Also called from the
+   * constructor and resolveTarget, so a fly-to aims at where the planet really
+   * is, even before the layer's first update (it only updates in 'helio').
+   */
+  private placePlanets(dt = 0): void {
     this.planetMeshes.forEach((item) => {
       const M = (item.meanAnomalyJ2000 + item.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
       
@@ -243,6 +253,7 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public resolveTarget(id: string) {
+    this.placePlanets();
     const found = this.planetMeshes.find(p => p.mesh.name === id);
     if (found) {
       const worldPos = new Float64Array([found.worldPos.x, found.worldPos.y, found.worldPos.z]);
