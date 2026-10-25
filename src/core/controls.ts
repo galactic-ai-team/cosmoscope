@@ -17,9 +17,14 @@
 // main.ts wiring:
 //   const controls = new CosmoControls(camera, { reducedMotion });
 //   controls.attach(renderer.domElement);
-//   controls.onUserInput(() => flyTo.cancel?.());   // grabbing cancels a flight
-//   // per frame, after flyTo.update(dt) and before camera.update():
-//   controls.enabled = !flyTo.isFlying;  // or however flyTo reports it
+//   controls.onUserInput(() => {                 // grabbing cancels a flight
+//     if (flight.flying) {
+//       flight.cancelFlight();
+//       controls.enabled = true;                 // so this same input applies
+//     }
+//   });
+//   // per frame, after flight.update(dt) and before camera.update():
+//   controls.enabled = !flight.flying;
 //   controls.update(dt);
 //
 // Input math is in plain methods (rotate, zoom, pinch) so it is testable
@@ -102,7 +107,12 @@ export class CosmoControls {
     this.up[2] = up[2] / len;
   }
 
-  /** Called whenever the user touches the controls (e.g. to cancel a flight). */
+  /**
+   * Called on every user input (press, drag, wheel, pinch, key), INCLUDING
+   * while disabled, and BEFORE the enabled check. So a listener can cancel a
+   * flight and set `enabled = true`, and the very input that grabbed the
+   * camera is applied instead of dropped.
+   */
   onUserInput(listener: () => void): () => void {
     this.inputListeners.add(listener);
     return () => this.inputListeners.delete(listener);
@@ -116,24 +126,25 @@ export class CosmoControls {
    * toward `up` (looking down on the target).
    */
   rotate(dxPixels: number, dyPixels: number): void {
+    this.touched();
     if (!this.enabled) return;
     this.pendingYaw -= dxPixels * this.rotateSpeed;
     this.pendingPitch += dyPixels * this.rotateSpeed;
-    this.touched();
   }
 
   /** Zoom by wheel notches: positive = out, negative = in. */
   zoom(notches: number): void {
+    this.touched();
     if (!this.enabled) return;
     this.pendingLogZoom += notches * this.zoomStep;
-    this.touched();
   }
 
   /** Pinch: ratio = previous finger spread / new spread (>1 zooms out). */
   pinch(ratio: number): void {
-    if (!this.enabled || !(ratio > 0)) return;
-    this.pendingLogZoom += Math.log(ratio);
+    if (!(ratio > 0)) return;
     this.touched();
+    if (!this.enabled) return;
+    this.pendingLogZoom += Math.log(ratio);
   }
 
   /** Drop any eased-in input that hasn't been applied yet. */
@@ -237,6 +248,7 @@ export class CosmoControls {
     };
 
     const onDown = (e: PointerEvent): void => {
+      this.touched(); // a press alone counts as grabbing the camera
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       el.setPointerCapture?.(e.pointerId);
       if (pointers.size === 2) lastSpread = spread();
