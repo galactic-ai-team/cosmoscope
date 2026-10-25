@@ -81,7 +81,11 @@ registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
 // only if it already exists. Missing HYG JSON is not fatal: the layer still resolves the Sun.
-const stars = makeStarsLayer(scene, camera);
+const stars = makeStarsLayer(
+  scene,
+  camera,
+  renderer.domElement,
+);
 const starsReady = stars.load(HYG_URL)
   .then((n) => console.info(`stars: ${n} HYG stars loaded`))
   .catch((err) => console.warn(`stars: HYG data unavailable (${HYG_URL}), running without the star field`, err))
