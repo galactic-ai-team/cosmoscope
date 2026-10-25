@@ -1,24 +1,26 @@
 // src/layers/galaxies.ts
 // Nova's galaxies & deep-sky layer for Cosmoscope.
-// Contracts: docs/CONTRACTS.md (PR #1). Ids confirmed as
-// <kind>:<catalog>:<id> (e.g. galaxy:messier:M31, galaxy:common:milkyway,
-// galaxy:sdss:<objid> for the later sample).
-// Frame (Claude, confirmed): 'galactic' is Sun-centred with ICRS axes,
-// core units parsecs. Positions here are therefore plain equatorial
-// Cartesian in parsecs — no galactic rotation needed. The galactic
-// center / north pole constants below pin the Milky Way's geometry for
-// the band file.
-// Catalog distanceM stays METRES per src/catalog.ts; only frame
-// positions are parsecs. resolveTarget follows Dee's shape:
-// { frameId, worldPos: Float64Array, approachRadius }, worldPos already
-// in the target's native frame ('galactic' here).
-// Rendering rebases float64 world positions to camera-relative float32
-// in update(), the only path from world space to render space.
-// Data: static, public-domain catalog values. Seed RA/Dec/distances are
-// standard catalog figures — validate against NED/HyperLEDA before launch.
+// Implements Dee's ScaleLayer directly (src/core/layers.ts) — no adapter.
+// Constructed via createGalaxiesLayer(scene, camera), the same factory
+// pattern as GPT-6's makeStarsLayer: enter() receives the FrameApi, but
+// scene membership and render scaling come from the factory closures.
+// Rendering follows Claude's camera recipe: each frame, every body's
+// float64 galactic-frame position (parsecs) goes through
+// camera.toCameraRelative() — frame conversion, camera subtraction and
+// render-unit scaling in one call, no group-scale hack, and frame hops
+// (galactic → cosmic) just work.
+// Ids confirmed: <kind>:<catalog>:<id> (galaxy:messier:M31,
+// galaxy:common:milkyway, galaxy:sdss:<objid> for the later sample).
+// Catalog distanceM stays METRES per src/catalog.ts; frame positions
+// are parsecs. resolveTarget returns Dee's ResolvedTarget shape.
+// Data: static, public-domain catalog values — validate against
+// NED/HyperLEDA before launch.
 
 import * as THREE from 'three';
 
+import type { FrameApi, CosmoCamera } from '../core/camera';
+import type { FrameId } from '../core/frames';
+import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import { register, type CatalogEntry } from '../catalog';
 
 const LY_M = 9.4607e15; // metres per light-year (catalog distanceM only)
@@ -26,8 +28,8 @@ const MLY_M = LY_M * 1e6; // metres per million light-years
 const LY_PER_PC = 3.26156; // light-years per parsec
 const PC_PER_MLY = 1e6 / LY_PER_PC; // parsecs per million light-years
 
-// Lane constants from Claude (via Lumi). GC drives the Milky Way center
-// entry below; NGP is the Milky Way disk-plane normal for the band file.
+// Lane constants from Claude. GC drives the Milky Way center entry
+// below; NGP is the Milky Way disk-plane normal for the band file.
 export const GALACTIC_CENTER = {
   raDeg: 266.405,
   decDeg: -28.936,
@@ -152,15 +154,37 @@ function makeGlowTexture(): THREE.Texture {
 }
 
 // Stars→galaxies handoff, agreed with GPT-6: stars fade out across
-// 60,000–100,000 ly from the Sun; this layer owns everything beyond.
+// 60,000–100,000 ly from the Sun. The fade lives on the stars side;
+// galaxies are visible at all distances (we see Andromeda from Earth!).
 export const STAR_HANDOFF_LY = { fadeStart: 60_000, fadeEnd: 100_000 } as const;
 
-let points: THREE.Points | null = null;
-let pointsGeometry: THREE.BufferGeometry | null = null;
-let pointsMaterial: THREE.PointsMaterial | null = null;
-let pointsTexture: THREE.Texture | null = null;
+/** Shared resolveTarget: both layers route ids through the same data. */
+function resolveGalaxyTarget(id: string): ResolvedTarget | null {
+  const i = byId.get(id);
+  if (i === undefined) return null;
+  const b = BODIES[i];
+  return {
+    frameId: 'galactic',
+    worldPos: new Float64Array([
+      positionsPc[i * 3],
+      positionsPc[i * 3 + 1],
+      positionsPc[i * 3 + 2],
+    ]),
+    // Flyby framing: stop at 20% of the body's distance.
+    approachRadius: b.distanceMly * PC_PER_MLY * 0.2,
+  };
+}
 
-function buildPoints(): THREE.Points {
+/**
+ * Build the galaxies ScaleLayer. The registry activates layers by frame
+ * (frames below) and crossfades opacity; update() receives the camera's
+ * distance to the origin for LOD decisions (unused at this seed size).
+ * No per-frame allocation: one scratch Float64Array + one Vector3.
+ */
+export function createGalaxiesLayer(
+  scene: THREE.Scene,
+  camera: CosmoCamera,
+): ScaleLayer {
   const n = BODIES.length;
   const positions = new Float32Array(n * 3); // camera-relative, refilled in update()
   const colors = new Float32Array(n * 3);
@@ -170,127 +194,71 @@ function buildPoints(): THREE.Points {
     colors[i * 3 + 1] = col.g;
     colors[i * 3 + 2] = col.b;
   });
-  pointsGeometry = new THREE.BufferGeometry();
-  pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  pointsTexture = makeGlowTexture();
-  pointsMaterial = new THREE.PointsMaterial({
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
     size: 6,
     sizeAttenuation: false,
-    map: pointsTexture,
+    map: makeGlowTexture(),
     vertexColors: true,
     transparent: true,
     opacity: 0.95,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
-  points = new THREE.Points(pointsGeometry, pointsMaterial);
+  const points = new THREE.Points(geometry, material);
   points.frustumCulled = false; // positions are rebased every frame
-  return points;
+
+  const scratch = new Float64Array(3);
+  const tmpVec = new THREE.Vector3();
+
+  const layer: ScaleLayer = {
+    idPrefix: 'galaxy',
+    // Visible in both frames: galactic positions convert to the camera's
+    // frame inside toCameraRelative, so cosmic-frame cameras work too.
+    frames: ['galactic', 'cosmic'],
+    renderBudget: n,
+
+    enter(_api: FrameApi): void {
+      scene.add(points);
+    },
+
+    exit(): void {
+      points.removeFromParent();
+    },
+
+    update(_dt: number, _distance: number, _api: FrameApi): void {
+      const attr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < n; i++) {
+        scratch[0] = positionsPc[i * 3];
+        scratch[1] = positionsPc[i * 3 + 1];
+        scratch[2] = positionsPc[i * 3 + 2];
+        camera.toCameraRelative(scratch, 'galactic', tmpVec);
+        attr.setXYZ(i, tmpVec.x, tmpVec.y, tmpVec.z);
+      }
+      attr.needsUpdate = true;
+    },
+
+    resolveTarget: resolveGalaxyTarget,
+  };
+  return layer;
 }
 
-export const galaxiesLayer = {
-  id: 'galaxies',
-  frameId: 'galactic',
-
-  // Provisional: units/semantics per Dee's registry (assumed frame
-  // parsecs — converted from the earlier 1e21 m figure).
-  pickRadius: 32400,
-  renderBudget: { drawCalls: 1, points: BODIES.length },
-
-  enter(scene: THREE.Scene): void {
-    if (!points) buildPoints();
-    if (points && !points.parent) scene.add(points);
-  },
-
-  exit(scene: THREE.Scene): void {
-    if (points && points.parent === scene) scene.remove(points);
-  },
-
-  /**
-   * Rebase float64 world positions (parsecs) to camera-relative float32
-   * every frame — the only path from world space to render space, per
-   * the contracts. cameraWorld is the camera's galactic-frame position
-   * in parsecs; pass Dee's getCameraWorldPosition() result once it
-   * lands. Until then it defaults to the origin (correct while the
-   * camera is near the Sun).
-   */
-  update(
-    _dt: number,
-    cameraWorld?: { x: number; y: number; z: number },
-  ): void {
-    if (!points || !pointsGeometry) return;
-    const attr = pointsGeometry.getAttribute('position') as THREE.BufferAttribute;
-    const cx = cameraWorld?.x ?? 0;
-    const cy = cameraWorld?.y ?? 0;
-    const cz = cameraWorld?.z ?? 0;
-    for (let i = 0; i < BODIES.length; i++) {
-      attr.setXYZ(
-        i,
-        positionsPc[i * 3] - cx,
-        positionsPc[i * 3 + 1] - cy,
-        positionsPc[i * 3 + 2] - cz,
-      );
-    }
-    attr.needsUpdate = true;
-  },
-
-  /** Bounding box of the layer in the requested frame's units (parsecs). */
-  boundsInFrameUnits(
-    frameId: string,
-  ): { min: [number, number, number]; max: [number, number, number] } | null {
-    // Only the galactic frame is native here; other frames belong to
-    // Claude's toFrame() once the Frame API lands.
-    if (frameId !== 'galactic') return null;
-    let minX = Infinity;
-    let minY = Infinity;
-    let minZ = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    let maxZ = -Infinity;
-    for (let i = 0; i < BODIES.length; i++) {
-      minX = Math.min(minX, positionsPc[i * 3]);
-      minY = Math.min(minY, positionsPc[i * 3 + 1]);
-      minZ = Math.min(minZ, positionsPc[i * 3 + 2]);
-      maxX = Math.max(maxX, positionsPc[i * 3]);
-      maxY = Math.max(maxY, positionsPc[i * 3 + 1]);
-      maxZ = Math.max(maxZ, positionsPc[i * 3 + 2]);
-    }
-    return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
-  },
-
-  /**
-   * Resolve a catalog id to a flyTo target, per Dee's shape: worldPos is
-   * a Float64Array already in the target's native frame ('galactic',
-   * parsecs here), and approachRadius frames the camera at 20% of the
-   * body's distance — a flyby framing.
-   */
-  resolveTarget(
-    id: string,
-  ): { frameId: string; worldPos: Float64Array; approachRadius: number } | null {
-    const i = byId.get(id);
-    if (i === undefined) return null;
-    const b = BODIES[i];
-    return {
-      frameId: 'galactic',
-      worldPos: new Float64Array([
-        positionsPc[i * 3],
-        positionsPc[i * 3 + 1],
-        positionsPc[i * 3 + 2],
-      ]),
-      approachRadius: b.distanceMly * PC_PER_MLY * 0.2,
-    };
-  },
-
-  dispose(): void {
-    pointsGeometry?.dispose();
-    pointsMaterial?.dispose();
-    pointsTexture?.dispose();
-    points = null;
-    pointsGeometry = null;
-    pointsMaterial = null;
-    pointsTexture = null;
-  },
+/**
+ * Clusters share this file's data, but the registry routes by id prefix,
+ * so cluster:* ids need their own entry. Rendered by the galaxies layer
+ * above (same Points object); this entry only routes resolveTarget.
+ * frames: [] means it never activates on its own.
+ */
+export const clustersRoute: ScaleLayer = {
+  idPrefix: 'cluster',
+  frames: [],
+  renderBudget: 0,
+  enter(_api: FrameApi): void {},
+  exit(): void {},
+  update(_dt: number, _distance: number, _api: FrameApi): void {},
+  resolveTarget: resolveGalaxyTarget,
 };
 
-export default galaxiesLayer;
+export default createGalaxiesLayer;
