@@ -59,7 +59,7 @@ const PLANETS: PlanetData[] = [
 ];
 
 export class SolarSystemLayer implements ScaleLayer {
-  public idPrefix = 'planet:';
+  public idPrefix = 'planet';
   public frames: FrameId[] = ['helio'];
   public minZoom = 1e3;
   public maxZoom = 1e12;
@@ -69,7 +69,7 @@ export class SolarSystemLayer implements ScaleLayer {
   private planetMeshes: { 
     mesh: THREE.Mesh; 
     pivot: THREE.Group; 
-    semiMajorAxis: number; 
+    semiMajorAxis: number; // in AU for helio calculations
     eccentricity: number; 
     meanAnomalyJ2000: number; 
     meanMotion: number;
@@ -98,21 +98,12 @@ export class SolarSystemLayer implements ScaleLayer {
     if (this.isInitialized) return;
     this.isInitialized = true;
 
-    // 1. Create Sun
+    // 1. Create Sun (at origin in helio frame = 0 AU)
     const sunGeo = new THREE.SphereGeometry(15, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
     this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
-
-    // Register Sun in global catalog for search/fly-to from start view
-    register([{
-      id: 'star:sol:sun',
-      name: 'Sun',
-      kind: 'star',
-      distanceM: 0,
-      blurb: 'The star at the center of our Solar System.'
-    } as CatalogEntry]);
 
     // Sun light
     const sunLight = new THREE.PointLight(0xffffff, 2, 1000);
@@ -125,6 +116,7 @@ export class SolarSystemLayer implements ScaleLayer {
       const pivot = new THREE.Group();
       this.container.add(pivot);
 
+      // Visual scaling factor: 1 AU = 25 scene units
       const scaledDist = data.semiMajorAxis * 25; 
       const scaledRadius = Math.max(data.radius * 0.2, 0.8);
 
@@ -189,7 +181,7 @@ export class SolarSystemLayer implements ScaleLayer {
       this.planetMeshes.push({
         mesh: planetMesh,
         pivot: pivot,
-        semiMajorAxis: scaledDist,
+        semiMajorAxis: data.semiMajorAxis, // Store true AU value for resolveTarget
         eccentricity: data.eccentricity,
         meanAnomalyJ2000: data.meanAnomalyJ2000,
         meanMotion: data.meanMotion,
@@ -224,8 +216,10 @@ export class SolarSystemLayer implements ScaleLayer {
         E = M + item.eccentricity * Math.sin(E);
       }
 
-      const xv = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
-      const zv = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
+      // Compute positions in visual scene units (semiMajorAxis * 25)
+      const visualSemiMajor = item.semiMajorAxis * 25;
+      const xv = visualSemiMajor * (Math.cos(E) - item.eccentricity);
+      const zv = visualSemiMajor * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
 
       item.mesh.position.x = xv;
       item.mesh.position.z = zv;
@@ -240,23 +234,38 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public resolveTarget(id: string) {
-    const found = this.planetMeshes.find(p => p.mesh.name === id);
-    if (found) {
-      const worldPos = new Float64Array([found.mesh.position.x, found.mesh.position.y, found.mesh.position.z]);
+    const planetIndex = PLANETS.findIndex(p => p.id === id);
+    if (planetIndex !== -1) {
+      const data = PLANETS[planetIndex];
+      // Compute exact Keplerian heliocentric position in AU for the fly-to camera target
+      const M = (data.meanAnomalyJ2000 + data.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
+      let E = M;
+      for (let iter = 0; iter < 3; iter++) {
+        E = M + data.eccentricity * Math.sin(E);
+      }
+      const xAU = data.semiMajorAxis * (Math.cos(E) - data.eccentricity);
+      const zAU = data.semiMajorAxis * Math.sqrt(1 - data.eccentricity * data.eccentricity) * Math.sin(E);
+
+      const worldPos = new Float64Array([xAU, 0, zAU]);
+      // Approach radius in AU (approx proportional to physical radius scaled to AU space)
+      const approachRadius = Math.max(data.radius / 1.496e8 * 10, 0.05);
+
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius: found.radius * 3.0
+        approachRadius
       };
     }
-    if (id === 'star:sol:sun' && this.sunMesh) {
-      const worldPos = new Float64Array([this.sunMesh.position.x, this.sunMesh.position.y, this.sunMesh.position.z]);
+
+    if (id === 'star:sol:sun') {
+      const worldPos = new Float64Array([0, 0, 0]);
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius: 45.0
+        approachRadius: 0.1
       };
     }
+
     return null;
   }
 
