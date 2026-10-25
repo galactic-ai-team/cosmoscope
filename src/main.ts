@@ -26,6 +26,7 @@ import { mountHelp } from './ui/help';
 import { mountConstellationToggle } from './ui/constellations';
 import { mountHomeKey } from './ui/home';
 import { orbitUpFor } from './ui/orbitUp';
+import { chooseFrame } from './ui/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -176,6 +177,10 @@ renderer.setAnimationLoop((ms: number) => {
   flight.update(now);   // Dee: moves the camera along the log-space path
   controls.enabled = !flight.active; // Claude: controls stand down mid-flight
   controls.update(dt);  // Claude: eased orbit/zoom around the target
+  if (!flight.active) {  // Lumi: helio <-> galactic by distance from the Sun (exact rebase)
+    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT), camera.getTarget(hudTarget)?.frame ?? null);
+    if (want !== camera.getFrameId()) camera.rebaseTo(want); // orbit axis stays the target's
+  }
   camera.update();      // Claude: sync the three.js puppet before layers read it
   registry.update(dt);  // Dee: crossfades + per-layer update (camera-relative positions)
 
