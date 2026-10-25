@@ -290,43 +290,55 @@ describe('LayerRegistry — LOD invariants', () => {
 
   it('fast jump past last tier still calls update() with level -1 and crossfade 0', () => {
     const api = makeFakeApi([0, 0, 0]);
-    const observed: { lod?: LodState; callCount: number } = { callCount: 0 };
+    const observed: { lod?: LodState; called: boolean; callCount: number } = {
+      called: false,
+      callCount: 0,
+    };
     const registry = new LayerRegistry(api);
-    const layer = makeFocusGalaxyLayer(observed);
 
-    // Wrap update to count calls (makeFocusGalaxyLayer already stashes `lod`
-    // into observed; we just need the call count on top of that).
-    const origUpdate = layer.update.bind(layer);
-    layer.update = (
-      dt: number,
-      dist: number,
-      a: FrameApi,
-      lod: Readonly<LodState>,
-    ): void => {
-      observed.callCount++;
-      origUpdate(dt, dist, a, lod);
+    // All-finite tiers so "beyond the last tier" is actually reachable.
+    // (makeFocusGalaxyLayer's last tier is Infinity, i.e. always-eligible —
+    // it can never be out of LOD range, which is the whole point of Infinity.)
+    const layer: ScaleLayer = {
+      idPrefix: 'galaxy',
+      frames: ['galactic'],
+      enter() {},
+      exit() {},
+      update(_dt, _dist, _api, lod) {
+        observed.called = true;
+        observed.callCount++;
+        observed.lod = lod;
+      },
+      renderBudget: 10_000,
+      resolveTarget() {
+        return null;
+      },
+      lodTiers: [
+        { maxDistance: 1e22, budgetFrac: 0.6, crossfadeRatio: 0.2 },
+        { maxDistance: 1e24, budgetFrac: 0.4, crossfadeRatio: 0.2 },
+      ],
     };
     registry.register(layer);
 
     const tier0Max = layer.lodTiers![0].maxDistance;
 
     // Frame 1: target inside tier 0 at half its maxDistance.
-    // basis 'focus' → focusDistance = camera→targetPoint.
-    api.targetPoint[0] = tier0Max * 0.5;
+    if (api.targetPoint) api.targetPoint[0] = tier0Max * 0.5;
     registry.update(0.016);
     expect(observed.callCount).toBe(1);
+    expect(observed.lod).toBeDefined();
     expect(observed.lod!.level).toBe(0);
     expect(observed.lod!.crossfade).toBe(1);
 
     // Frame 2: target jumps beyond 1.2× the LAST tier's maxDistance in one
     // frame. Layer must still receive update() with level -1 and crossfade 0
     // so it can hide itself; skipping update() would freeze it visible.
-    const tiers = layer.lodTiers!;
-    const lastMax = tiers[tiers.length - 1].maxDistance;
-    api.targetPoint[0] = lastMax * HYSTERESIS_RATIO * 2;
+    const lastMax = layer.lodTiers![layer.lodTiers!.length - 1].maxDistance;
+    if (api.targetPoint) api.targetPoint[0] = lastMax * HYSTERESIS_RATIO * 2;
     registry.update(0.016);
 
     expect(observed.callCount).toBe(2);
+    expect(observed.lod).toBeDefined();
     expect(observed.lod!.level).toBe(-1);
     expect(observed.lod!.crossfade).toBe(0);
     expect(observed.lod!.frameOpacity).toBeGreaterThan(0);
