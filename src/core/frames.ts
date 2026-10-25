@@ -102,7 +102,7 @@ export class FrameStack {
   }
 
   /** Position in `id` units -> root meters. */
-  toRootMeters(pos: Vec3Like, id: FrameId, out = new Float64Array(3)): Float64Array {
+  toRootMeters(pos: Vec3Like, id: FrameId, out: Float64Array = new Float64Array(3)): Float64Array {
     const f = this.frame(id);
     out[0] = f.origin[0] + pos[0] * f.unitMeters;
     out[1] = f.origin[1] + pos[1] * f.unitMeters;
@@ -111,7 +111,7 @@ export class FrameStack {
   }
 
   /** Root meters -> position in `id` units. */
-  fromRootMeters(m: Vec3Like, id: FrameId, out = new Float64Array(3)): Float64Array {
+  fromRootMeters(m: Vec3Like, id: FrameId, out: Float64Array = new Float64Array(3)): Float64Array {
     const f = this.frame(id);
     out[0] = (m[0] - f.origin[0]) / f.unitMeters;
     out[1] = (m[1] - f.origin[1]) / f.unitMeters;
@@ -120,7 +120,7 @@ export class FrameStack {
   }
 
   /** Re-express a position from one frame in another. `out` may alias `pos`. */
-  toFrame(pos: Vec3Like, from: FrameId, to: FrameId, out = new Float64Array(3)): Float64Array {
+  toFrame(pos: Vec3Like, from: FrameId, to: FrameId, out: Float64Array = new Float64Array(3)): Float64Array {
     if (from === to) {
       out[0] = pos[0];
       out[1] = pos[1];
