@@ -24,6 +24,7 @@ import { linkSearchToFlight, kindFromId, flightKind, type Flyer } from './ui/fly
 import { createTour } from './ui/tour';
 import { mountHelp } from './ui/help';
 import { mountConstellationToggle } from './ui/constellations';
+import { mountHomeKey } from './ui/home';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -125,7 +126,10 @@ tourBtn?.addEventListener('click', () => {
   tourBtn.textContent = 'Stop tour';
   tour.start();
 });
-mountSearch((id) => { tour.stop(); recordPick(id); flyToPick(id); }, false);
+const pickTarget = (id: string): void => { tour.stop(); recordPick(id); flyToPick(id); };
+mountSearch(pickTarget, false);
+// Home key (Lumi): H flies back to the Sun, same path as a search pick.
+mountHomeKey(pickTarget);
 
 // ---- navigation: Claude's CosmoControls (drag orbit, wheel/pinch log zoom, keys) ----
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
