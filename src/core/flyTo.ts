@@ -73,13 +73,23 @@ export class FlyToController {
     return this.state !== null && !this.state.cancelled;
   }
 
-  /** Cancel the current flight, if any. No handle needed. */
+  /**
+   * Cancel the current flight, if any. No handle needed.
+   * Lumi (Dee's suggestion): run one chooseFrame pass so a flight cancelled
+   * far from the Sun leaves the camera in the right frame
+   * (helio/galactic/cosmic), same rules as update().
+   */
   cancelFlight(): void {
-    if (this.state) {
-      this.state.cancelled = true;
-      this.state.resolve();
-      this.state = null;
+    const s = this.state;
+    if (!s) return;
+    s.cancelled = true;
+    this.state = null;
+    if (typeof this.api.distanceTo === 'function') { // minimal test fakes skip it
+      const current = this.api.getFrameId();
+      const want = chooseFrame(current, this.api.distanceTo(SUN_AT), s.targetFrame);
+      if (want !== current) this.api.rebaseTo(want);
     }
+    s.resolve();
   }
 
   flyTo(target: FlyToTarget, now = performance.now() / 1000): FlyToHandle {
