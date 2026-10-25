@@ -4,7 +4,7 @@
 // never activate and the view goes black. Hysteresis keeps a camera hovering
 // near the boundary from flipping every frame. rebaseTo() is exact, so the
 // switch itself doesn't move anything on screen.
-import { METERS, type FrameId } from '../core/frames';
+import { METERS, type FrameId } from './frames';
 
 /**
  * helio -> galactic where Gemini's solar fade ends (120 AU, solarSystemLayer.ts),

@@ -15,9 +15,13 @@
 // of its input handler and stand down while true. `flyer.cancelFlight()` is a
 // controller-level cancel (no handle needed) for ESC-key / user-interrupt.
 
-import type { FrameApi } from './camera';
+import type { FrameApi, FramedPoint } from './camera';
+import { chooseFrame } from './frameSwitch';
 import type { FrameId } from './frames';
 import type { LayerRegistry } from './layers';
+
+/** The Sun, as the helio origin (Lumi: frame choice mid-flight). */
+const SUN_AT: FramedPoint = { frame: 'helio', position: [0, 0, 0] };
 
 export type TargetKind = 'planet' | 'star' | 'galaxy' | 'cluster';
 export type Approach = 'orbit' | 'surface' | 'flyby';
@@ -168,8 +172,18 @@ export class FlyToController {
     outPos[1] = s.targetPos[1] + s.startDir[1] * curDistFromTarget;
     outPos[2] = s.targetPos[2] + s.startDir[2] * curDistFromTarget;
 
+    // Lumi (Claude's #44 follow-up): pick the camera's frame by distance from
+    // the Sun mid-flight too, with the same hysteresis as the idle loop, so a
+    // flight from deep space to a planet keeps the star field until it's
+    // inside 80 AU, and a flight out from a planet switches to 'galactic' at
+    // 120 AU. Path math stays in the target's frame; rebaseTo() is exact.
+    const prevFrame = this.api.getFrameId();
     this.api.setCameraFrameAndPosition(s.targetFrame, outPos);
-    this.api.lookAt(s.targetPos);
+    if (typeof this.api.distanceTo === 'function') { // minimal test fakes skip it
+      const want = chooseFrame(prevFrame, this.api.distanceTo(SUN_AT), s.targetFrame);
+      if (want !== s.targetFrame) this.api.rebaseTo(want);
+    }
+    this.api.lookAt(s.targetPos, s.targetFrame);
 
     if (rawT >= 1) {
       s.resolve();
