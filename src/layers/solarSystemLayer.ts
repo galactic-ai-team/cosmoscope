@@ -71,10 +71,7 @@ export class SolarSystemLayer implements ScaleLayer {
   private planetMeshes: { 
     mesh: THREE.Mesh; 
     pivot: THREE.Group; 
-    semiMajorAxis: number; 
-    eccentricity: number; 
-    meanAnomalyJ2000: number; 
-    meanMotion: number;
+    data: PlanetData;
     approachRadius: number;
     worldPos: THREE.Vector3;
     material: THREE.MeshStandardMaterial;
@@ -99,6 +96,8 @@ export class SolarSystemLayer implements ScaleLayer {
     this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
 
     this.buildSolarSystem();
+    // Initialize positions immediately so resolveTarget has fresh coords on startup
+    this.placePlanets(this.daysSinceJ2000, 0);
   }
 
   private buildSolarSystem(): void {
@@ -133,7 +132,7 @@ export class SolarSystemLayer implements ScaleLayer {
       const planetMat = new THREE.MeshStandardMaterial({ 
         color: data.color,
         emissive: data.color,
-        emissiveIntensity: 0.2, // Ensures planet is visible from dark sides/distance
+        emissiveIntensity: 0.2,
         roughness: 0.6,
         metalness: 0.1,
         transparent: true,
@@ -200,10 +199,7 @@ export class SolarSystemLayer implements ScaleLayer {
       this.planetMeshes.push({
         mesh: planetMesh,
         pivot: pivot,
-        semiMajorAxis: data.semiMajorAxis,
-        eccentricity: data.eccentricity,
-        meanAnomalyJ2000: data.meanAnomalyJ2000,
-        meanMotion: data.meanMotion,
+        data,
         approachRadius: auRadius * 3.0,
         worldPos: new THREE.Vector3(auDist, 0, 0),
         material: planetMat,
@@ -213,7 +209,36 @@ export class SolarSystemLayer implements ScaleLayer {
     });
 
     register(catalogEntries);
-    this.placePlanets();
+  }
+
+  private placePlanets(days: number, dt: number): void {
+    if (this.sunMesh) {
+      this.sunMesh.rotation.y += dt * 0.05;
+    }
+
+    this.planetMeshes.forEach((item) => {
+      const M = (item.data.meanAnomalyJ2000 + item.data.meanMotion * days) * (Math.PI / 180);
+      
+      let E = M;
+      for (let iter = 0; iter < 3; iter++) {
+        E = M + item.data.eccentricity * Math.sin(E);
+      }
+
+      const xAU = item.data.semiMajorAxis * (Math.cos(E) - item.data.eccentricity);
+      const zAU = item.data.semiMajorAxis * Math.sqrt(1 - item.data.eccentricity * item.data.eccentricity) * Math.sin(E);
+
+      item.worldPos.set(xAU, 0, zAU);
+
+      item.mesh.position.x = xAU;
+      item.mesh.position.z = zAU;
+      item.mesh.rotation.y += dt * 0.5;
+
+      if (item.moons) {
+        item.moons.forEach((moon) => {
+          moon.pivot.rotation.y += dt * moon.speed * 0.1;
+        });
+      }
+    });
   }
 
   public enter(_api: FrameApi): void {
@@ -230,6 +255,9 @@ export class SolarSystemLayer implements ScaleLayer {
     this.camera.toCameraRelative(SolarSystemLayer.ORIGIN, 'helio', this.container.position);
     this.container.scale.setScalar(this.camera.layerScale('helio'));
 
+    // Update positions via placePlanets
+    this.placePlanets(this.daysSinceJ2000, dt);
+
     // Fade out smoothly as camera zooms past outer planets (35 AU -> 120 AU) towards stars
     const fadeStart = 35.0;
     const fadeEnd = 120.0;
@@ -239,37 +267,7 @@ export class SolarSystemLayer implements ScaleLayer {
       this.sunMaterial.opacity = alpha;
     }
 
-    if (this.sunMesh) {
-      this.sunMesh.rotation.y += dt * 0.05;
-    }
-
-    this.placePlanets(dt);
-  }
-
-  /**
-   * Kepler positions for the current clock (Lumi). Also called from the
-   * constructor and resolveTarget, so a fly-to aims at where the planet really
-   * is, even before the layer's first update (it only updates in 'helio').
-   */
-  private placePlanets(dt = 0): void {
     this.planetMeshes.forEach((item) => {
-      const M = (item.meanAnomalyJ2000 + item.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
-      
-      let E = M;
-      for (let iter = 0; iter < 3; iter++) {
-        E = M + item.eccentricity * Math.sin(E);
-      }
-
-      const xAU = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
-      const zAU = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
-
-      item.worldPos.set(xAU, 0, zAU);
-
-      item.mesh.position.x = xAU;
-      item.mesh.position.z = zAU;
-      item.mesh.rotation.y += dt * 0.5;
-
-      // Apply distance fade alpha
       item.material.opacity = alpha;
       if (item.orbitLine) {
         (item.orbitLine.material as THREE.LineBasicMaterial).opacity = 0.15 * alpha;
@@ -277,7 +275,6 @@ export class SolarSystemLayer implements ScaleLayer {
 
       if (item.moons) {
         item.moons.forEach((moon) => {
-          moon.pivot.rotation.y += dt * moon.speed * 0.1;
           moon.material.opacity = alpha;
         });
       }
@@ -285,11 +282,13 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public lodLevel(): number {
-    return this.camera.position.length();
+    return this.camera.getCameraDistanceToOrigin();
   }
 
   public resolveTarget(id: string) {
-    this.placePlanets();
+    // Ensure positions are fully up-to-date even when called from non-helio frames
+    this.placePlanets(this.daysSinceJ2000, 0);
+
     const found = this.planetMeshes.find(p => p.mesh.name === id);
     if (found) {
       const worldPos = new Float64Array([found.worldPos.x, found.worldPos.y, found.worldPos.z]);
@@ -318,4 +317,3 @@ export class SolarSystemLayer implements ScaleLayer {
     }
   }
 }
-
