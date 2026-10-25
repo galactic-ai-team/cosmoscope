@@ -54,6 +54,7 @@ export interface FrameApi {
   rebaseTo(frameId: FrameId): void;
   getCameraDistanceToOrigin(): number;
   unitsPerFrame(frameId: FrameId): number;
+  toFrame(point: Vec3Like, from: FrameId, to: FrameId, out?: Float64Array): Float64Array;
   setPose(pose: Pose): void;
   lookAt(point: Vec3Like, frameId?: FrameId): void;
   distanceTo(point: FramedPoint): number;
@@ -177,6 +178,14 @@ export class CosmoCamera implements FrameApi {
     return this.frames.unitsPerFrame(frameId);
   }
 
+  /**
+   * Re-express any point from one frame in another (exact; frames.toFrame
+   * under the hood). For a frame offset, pass [0, 0, 0]. `out` may alias
+   * `point`; pass it to avoid allocating.
+   */
+  toFrame(point: Vec3Like, from: FrameId, to: FrameId, out?: Float64Array): Float64Array {
+    return this.frames.toFrame(point, from, to, out ?? new Float64Array(3));
+  }
   /**
    * Switch frames and set position in one call; `pos` is in `frameId` units.
    * Same as setPose({ frame, position }) with target and up unchanged.
