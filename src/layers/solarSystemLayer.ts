@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
 import { FrameApi } from '../core/camera';
 import { FrameId } from '../core/frames';
+import { register, CatalogEntry } from '../catalog';
 
 interface PlanetData {
   name: string;
@@ -10,7 +11,7 @@ interface PlanetData {
   semiMajorAxis: number; // AU
   eccentricity: number; // orbital eccentricity
   inclination: number; // orbital inclination in degrees
-  meanAnomaly0: number; // mean anomaly at epoch in degrees
+  meanAnomalyJ2000: number; // mean anomaly at J2000 epoch in degrees
   meanMotion: number; // degrees per Earth day
   orbitPeriod: number; // Earth years
   color: number;
@@ -18,8 +19,8 @@ interface PlanetData {
 }
 
 const PLANETS: PlanetData[] = [
-  { name: 'Mercury', id: 'planet:mercury', radius: 2.4, semiMajorAxis: 0.387, eccentricity: 0.2056, inclination: 7.0, meanAnomaly0: 174.79, meanMotion: 4.0923344, orbitPeriod: 0.24, color: 0x888888 },
-  { name: 'Venus', id: 'planet:venus', radius: 6.05, semiMajorAxis: 0.723, eccentricity: 0.0067, inclination: 3.39, meanAnomaly0: 50.115, meanMotion: 1.6021303, orbitPeriod: 0.62, color: 0xe3bb76 },
+  { name: 'Mercury', id: 'planet:mercury', radius: 2.4, semiMajorAxis: 0.387, eccentricity: 0.2056, inclination: 7.0, meanAnomalyJ2000: 174.79, meanMotion: 4.0923344, orbitPeriod: 0.24, color: 0x888888 },
+  { name: 'Venus', id: 'planet:venus', radius: 6.05, semiMajorAxis: 0.723, eccentricity: 0.0067, inclination: 3.39, meanAnomalyJ2000: 50.115, meanMotion: 1.6021303, orbitPeriod: 0.62, color: 0xe3bb76 },
   { 
     name: 'Earth', 
     id: 'planet:earth', 
@@ -27,7 +28,7 @@ const PLANETS: PlanetData[] = [
     semiMajorAxis: 1.0, 
     eccentricity: 0.0167, 
     inclination: 0.0, 
-    meanAnomaly0: 357.517, 
+    meanAnomalyJ2000: 357.517, 
     meanMotion: 0.9856091, 
     orbitPeriod: 1.0, 
     color: 0x2233ff, 
@@ -42,7 +43,7 @@ const PLANETS: PlanetData[] = [
     semiMajorAxis: 1.524, 
     eccentricity: 0.0934, 
     inclination: 1.85, 
-    meanAnomaly0: 19.373, 
+    meanAnomalyJ2000: 19.373, 
     meanMotion: 0.5240330, 
     orbitPeriod: 1.88, 
     color: 0xc1440e, 
@@ -51,15 +52,15 @@ const PLANETS: PlanetData[] = [
       { name: 'Deimos', id: 'moon:deimos', distance: 0.04, radius: 0.4, color: 0x776655, speed: 15.0 }
     ] 
   },
-  { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomaly0: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
-  { name: 'Saturn', id: 'planet:saturn', radius: 58.2, semiMajorAxis: 9.582, eccentricity: 0.0555, inclination: 2.49, meanAnomaly0: 317.020, meanMotion: 0.0334441, orbitPeriod: 29.46, color: 0xe2bf7d },
-  { name: 'Uranus', id: 'planet:uranus', radius: 25.3, semiMajorAxis: 19.201, eccentricity: 0.0463, inclination: 0.77, meanAnomaly0: 142.238, meanMotion: 0.0117315, orbitPeriod: 84.01, color: 0x73b7e6 },
-  { name: 'Neptune', id: 'planet:neptune', radius: 24.6, semiMajorAxis: 30.047, eccentricity: 0.0095, inclination: 1.77, meanAnomaly0: 256.228, meanMotion: 0.0059811, orbitPeriod: 164.8, color: 0x3d6dfd }
+  { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomalyJ2000: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
+  { name: 'Saturn', id: 'planet:saturn', radius: 58.2, semiMajorAxis: 9.582, eccentricity: 0.0555, inclination: 2.49, meanAnomalyJ2000: 317.020, meanMotion: 0.0334441, orbitPeriod: 29.46, color: 0xe2bf7d },
+  { name: 'Uranus', id: 'planet:uranus', radius: 25.3, semiMajorAxis: 19.201, eccentricity: 0.0463, inclination: 0.77, meanAnomalyJ2000: 142.238, meanMotion: 0.0117315, orbitPeriod: 84.01, color: 0x73b7e6 },
+  { name: 'Neptune', id: 'planet:neptune', radius: 24.6, semiMajorAxis: 30.047, eccentricity: 0.0095, inclination: 1.77, meanAnomalyJ2000: 256.228, meanMotion: 0.0059811, orbitPeriod: 164.8, color: 0x3d6dfd }
 ];
 
 export class SolarSystemLayer implements ScaleLayer {
   public idPrefix = 'planet:';
-  public frames: FrameId[] = ['heliocentric'];
+  public frames: FrameId[] = ['helio'];
   public minZoom = 1e3;
   public maxZoom = 1e12;
   public renderBudget = 10;
@@ -70,24 +71,27 @@ export class SolarSystemLayer implements ScaleLayer {
     pivot: THREE.Group; 
     semiMajorAxis: number; 
     eccentricity: number; 
-    meanAnomaly0: number; 
+    meanAnomalyJ2000: number; 
     meanMotion: number;
     radius: number;
     moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
-  private api: FrameApi | null = null;
-  private simTimeDays = 0;
+  private scene: THREE.Scene;
+  private daysSinceJ2000 = 0;
 
-  constructor() {
+  constructor(scene: THREE.Scene) {
+    this.scene = scene;
     this.container = new THREE.Group();
     this.container.name = 'SolarSystemLayer';
+
+    // Compute exact days elapsed from J2000.0 epoch (Jan 1, 2000, 12:00 TT) to current date
+    const j2000Epoch = Date.UTC(2000, 0, 1, 12, 0, 0);
+    const now = Date.now();
+    this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
   }
 
-  public enter(api: FrameApi): void {
-    this.api = api;
-    const scene = api.scene;
-
+  public enter(_api: FrameApi): void {
     // 1. Create Sun
     const sunGeo = new THREE.SphereGeometry(15, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
@@ -95,18 +99,20 @@ export class SolarSystemLayer implements ScaleLayer {
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
 
-    // Register Sun in catalog for search/fly-to
-    this.api.register({
+    // Register Sun in global catalog
+    register([{
       id: 'star:sol:sun',
-      kind: 'star',
       name: 'Sun',
-      position: new THREE.Vector3(0, 0, 0),
-      radius: 15
-    });
+      kind: 'star',
+      distanceM: 0,
+      blurb: 'The star at the center of our Solar System.'
+    } as CatalogEntry]);
 
     // Sun light
     const sunLight = new THREE.PointLight(0xffffff, 2, 1000);
     this.container.add(sunLight);
+
+    const catalogEntries: CatalogEntry[] = [];
 
     // 2. Create Planets and Moons
     PLANETS.forEach((data) => {
@@ -127,14 +133,12 @@ export class SolarSystemLayer implements ScaleLayer {
       planetMesh.name = data.id;
       pivot.add(planetMesh);
 
-      // Register planet in catalog for search/fly-to
-      const initialPos = new THREE.Vector3(scaledDist, 0, 0);
-      this.api?.register({
+      catalogEntries.push({
         id: data.id,
-        kind: 'planet',
         name: data.name,
-        position: initialPos,
-        radius: scaledRadius
+        kind: 'planet',
+        distanceM: data.semiMajorAxis * 1.496e11,
+        blurb: `${data.name} is a planet in our Solar System.`
       });
 
       // Orbit line visualization
@@ -164,12 +168,12 @@ export class SolarSystemLayer implements ScaleLayer {
           moonMesh.position.x = moonDist;
           moonPivot.add(moonMesh);
 
-          this.api?.register({
+          catalogEntries.push({
             id: moonData.id,
-            kind: 'moon',
             name: moonData.name,
-            position: initialPos.clone().add(new THREE.Vector3(moonDist, 0, 0)),
-            radius: moonData.radius * 0.3
+            kind: 'planet',
+            distanceM: (data.semiMajorAxis * 1.496e11) + (moonData.distance * 1.496e10),
+            blurb: `Natural satellite of ${data.name}.`
           });
 
           moonEntries.push({ mesh: moonMesh, pivot: moonPivot, speed: moonData.speed });
@@ -181,25 +185,28 @@ export class SolarSystemLayer implements ScaleLayer {
         pivot: pivot,
         semiMajorAxis: scaledDist,
         eccentricity: data.eccentricity,
-        meanAnomaly0: data.meanAnomaly0,
+        meanAnomalyJ2000: data.meanAnomalyJ2000,
         meanMotion: data.meanMotion,
         radius: scaledRadius,
         moons: moonEntries
       });
     });
 
-    scene.add(this.container);
+    register(catalogEntries);
+    this.scene.add(this.container);
   }
 
   public update(dt: number): void {
-    this.simTimeDays += dt * 5.0;
+    // Advance simulation time matching real-world date progression + playback delta
+    this.daysSinceJ2000 += dt * 5.0;
 
     if (this.sunMesh) {
       this.sunMesh.rotation.y += dt * 0.05;
     }
 
     this.planetMeshes.forEach((item) => {
-      const M = (item.meanAnomaly0 + item.meanMotion * this.simTimeDays) * (Math.PI / 180);
+      // Accurate Keplerian propagation from J2000 epoch: M = M0 + n * t
+      const M = (item.meanAnomalyJ2000 + item.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
       
       let E = M;
       for (let iter = 0; iter < 3; iter++) {
@@ -226,7 +233,7 @@ export class SolarSystemLayer implements ScaleLayer {
     if (found) {
       const worldPos = new Float64Array([found.mesh.position.x, found.mesh.position.y, found.mesh.position.z]);
       return {
-        frameId: 'heliocentric' as FrameId,
+        frameId: 'helio' as FrameId,
         worldPos,
         approachRadius: found.radius * 3.0
       };
@@ -234,7 +241,7 @@ export class SolarSystemLayer implements ScaleLayer {
     if (id === 'star:sol:sun' && this.sunMesh) {
       const worldPos = new Float64Array([this.sunMesh.position.x, this.sunMesh.position.y, this.sunMesh.position.z]);
       return {
-        frameId: 'heliocentric' as FrameId,
+        frameId: 'helio' as FrameId,
         worldPos,
         approachRadius: 45.0
       };
