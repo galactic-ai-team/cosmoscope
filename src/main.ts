@@ -11,7 +11,8 @@ import * as THREE from 'three';
 import { register } from './catalog';
 import { CosmoCamera, RENDERER_OPTIONS } from './core/camera';
 import { FrameStack, type FrameId } from './core/frames';
-import { FlyToController, type FlyToTarget } from './core/flyTo';
+import { FlyToController, type FlyToTarget, type FlyToHandle } from './core/flyTo';
+import { CosmoControls } from './core/controls';
 import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, createStubPlanetLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
@@ -85,6 +86,7 @@ const starsReady = stars.load(HYG_URL)
 const flight = new FlyToController(camera, registry);
 let now = performance.now() / 1000; // loop clock, seconds
 
+let currentFlight: FlyToHandle | null = null;
 /** Point the camera at the target as the flight starts (flyTo moves position only). */
 const flyer: Flyer = {
   flyTo(t: FlyToTarget, at?: number) {
@@ -96,7 +98,8 @@ const flyer: Flyer = {
         target: { frame: r.frameId, position: r.worldPos },
       });
     }
-    return flight.flyTo(t, at ?? now);
+    currentFlight = flight.flyTo(t, at ?? now);
+    return currentFlight;
   },
 };
 const flyToPick = linkSearchToFlight(flyer, showInfoById, undefined, () => now);
@@ -121,36 +124,16 @@ tourBtn?.addEventListener('click', () => {
 });
 mountSearch((id) => { tour.stop(); recordPick(id); flyToPick(id); }, false);
 
-// ---- simple navigation: wheel = log zoom toward target, drag = orbit ---------
-const tmpTarget = new Float64Array(3);
-const tmpCam = new Float64Array(3);
-function orbitBy(zoom: number, dAz: number, dEl: number): void {
-  const tgt = camera.getTarget(tmpTarget);
-  if (!tgt || flight.active) return;
-  const f = camera.getFrameId();
-  const t = frames.toFrame(tgt.position, tgt.frame, f, new Float64Array(3));
-  camera.getCameraWorldPosition(f, tmpCam);
-  const x = tmpCam[0] - t[0], y = tmpCam[1] - t[1], z = tmpCam[2] - t[2];
-  const r = Math.hypot(x, y, z) * zoom;
-  if (!(r > 0)) return;
-  const az = Math.atan2(y, x) + dAz;
-  const el = Math.max(-1.5, Math.min(1.5, Math.asin(z / Math.hypot(x, y, z)) + dEl));
-  camera.setCameraWorldPosition([
-    t[0] + r * Math.cos(el) * Math.cos(az),
-    t[1] + r * Math.cos(el) * Math.sin(az),
-    t[2] + r * Math.sin(el),
-  ], f);
-}
-const canvas = renderer.domElement;
-canvas.addEventListener('wheel', (ev) => { ev.preventDefault(); orbitBy(Math.exp(ev.deltaY * 0.0015), 0, 0); }, { passive: false });
-let drag: { x: number; y: number } | null = null;
-canvas.addEventListener('pointerdown', (ev) => { drag = { x: ev.clientX, y: ev.clientY }; canvas.setPointerCapture(ev.pointerId); });
-canvas.addEventListener('pointerup', () => { drag = null; });
-canvas.addEventListener('pointermove', (ev) => {
-  if (!drag) return;
-  orbitBy(1, -(ev.clientX - drag.x) * 0.005, (ev.clientY - drag.y) * 0.005);
-  drag = { x: ev.clientX, y: ev.clientY };
-});
+// ---- navigation: Claude's CosmoControls (drag orbit, wheel/pinch log zoom, keys) ----
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const controls = new CosmoControls(camera, { reducedMotion });
+controls.attach(renderer.domElement);
+// Grabbing the view cancels a running flight and the Grand Tour.
+// Controls drop input while disabled (mid-flight), so listen on the canvas too.
+const grab = (): void => { tour.stop(); currentFlight?.cancel(); currentFlight = null; };
+controls.onUserInput(grab);
+renderer.domElement.addEventListener('pointerdown', grab);
+renderer.domElement.addEventListener('wheel', grab, { passive: true });
 
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
@@ -171,6 +154,8 @@ renderer.setAnimationLoop((ms: number) => {
   last = now;
 
   flight.update(now);   // Dee: moves the camera along the log-space path
+  controls.enabled = !flight.active; // Claude: controls stand down mid-flight
+  controls.update(dt);  // Claude: eased orbit/zoom around the target
   camera.update();      // Claude: sync the three.js puppet before layers read it
   registry.update(dt);  // Dee: crossfades + per-layer update (camera-relative positions)
 
