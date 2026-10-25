@@ -8,9 +8,10 @@ import {
   DEFAULT_GLOBAL_OBJECT_CAP,
   computeCrossfade,
   makeLodState,
-  resolveTierDistance,
-  selectTier,
+  resolveLayerDistance,
+  selectTierInto,
   validateLodTiers,
+  type DistanceBasis,
   type LodState,
   type LodTier,
   type MutableLodState,
@@ -42,7 +43,16 @@ export interface ScaleLayer {
   lodLevel?(): number;
   /** Optional LOD tier table. If absent, layer always draws (backward compat). */
   lodTiers?: LodTier[];
-  /** Optional default anchor for tiers without their own anchor. */
+  /**
+   * Distance basis for tier selection. One basis per layer, never per tier.
+   *   'anchor' — measure against defaultAnchor; no anchor = behaves like 'focus'.
+   *   'focus'  — always camera→focus (getFocusDistance with no argument).
+   *   'nearer' — Math.min(anchorDistance, focusDistance); for layers that
+   *              want near-camera detail even when far from the anchor.
+   * Default 'anchor' (backward compat).
+   */
+  basis?: DistanceBasis;
+  /** Anchor used by basis 'anchor' and 'nearer'. */
   defaultAnchor?: FramedPoint;
 }
 
@@ -52,8 +62,6 @@ interface LayerEntry {
   opacity: number;
   /** Reused LodState backing for this layer. Never reallocated. */
   lod: MutableLodState;
-  /** Current level from last frame, for hysteresis. -1 = inactive. */
-  currentLevel: number;
 }
 
 export class LayerRegistry {
@@ -82,7 +90,6 @@ export class LayerRegistry {
       active: false,
       opacity: 0,
       lod: makeLodState(),
-      currentLevel: -1,
     });
   }
 
@@ -100,11 +107,6 @@ export class LayerRegistry {
   update(dt: number, crossfadeSeconds = 0.4): void {
     const frame = this.api.getFrameId();
     const step = crossfadeSeconds > 0 ? dt / crossfadeSeconds : 1;
-
-    // Camera-focus distance is the same for every layer this frame — compute
-    // once. Claude confirmed getFocusDistance() returns the live distance to
-    // the flight target during a flyTo.
-    const cameraFocusDistance = this.api.getFocusDistance();
 
     interface ActiveEntry {
       entry: LayerEntry;
@@ -127,7 +129,7 @@ export class LayerRegistry {
       if (!shouldBeActive && entry.active && entry.opacity <= 0) {
         entry.layer.exit();
         entry.active = false;
-        entry.currentLevel = -1;
+        entry.lod.level = -1;
         continue;
       }
 
@@ -135,51 +137,41 @@ export class LayerRegistry {
 
       const tiers = entry.layer.lodTiers;
       if (!tiers) {
-        // No LOD: layer always draws at full budget when active.
+        // No LOD: always draw at full budget when active.
         entry.lod.level = -1;
         entry.lod.crossfade = 1;
         entry.lod.budgetFrac = 0; // filled in phase 2
         entry.lod.focusDistance = 0;
-        entry.lod.cameraFocusDistance = cameraFocusDistance;
-        entry.lod.focusId = null;
+        entry.lod.cameraFocusDistance = 0;
+        entry.lod.distanceBasis = null;
         entry.lod.heldByHysteresis = false;
         activeNow.push({ entry, rawBudget: 1.0 });
         continue;
       }
 
-      // Probe tier: use last frame's level for the anchor, or tier 0 on first
-      // frame. One pass — iterating to a fixed point could oscillate.
-      const probeLevel =
-        entry.currentLevel >= 0 && entry.currentLevel < tiers.length
-          ? entry.currentLevel
-          : 0;
-      const probeTier = tiers[probeLevel];
-      const resolved = resolveTierDistance(
-        probeTier,
+      // Resolve the layer's selection distance into entry.lod (no alloc).
+      resolveLayerDistance(
+        entry.layer.basis ?? 'anchor',
         entry.layer.defaultAnchor,
         this.api,
+        entry.lod,
       );
 
-      // selectTier is pure: distance already resolved, returns only
-      // { level, heldByHysteresis }.
-      const sel = selectTier(tiers, resolved.distance, entry.currentLevel);
+      // Tier selection writes level + heldByHysteresis into entry.lod.
+      selectTierInto(tiers, entry.lod.focusDistance, entry.lod);
 
-      entry.lod.level = sel.level;
-      entry.lod.focusDistance = resolved.distance;
-      entry.lod.cameraFocusDistance = cameraFocusDistance;
-      entry.lod.focusId = sel.level === -1 ? null : resolved.focusId;
-      entry.lod.heldByHysteresis = sel.heldByHysteresis;
       entry.lod.crossfade =
-        sel.level >= 0 ? computeCrossfade(tiers[sel.level], resolved.distance) : 0;
+        entry.lod.level >= 0
+          ? computeCrossfade(tiers[entry.lod.level], entry.lod.focusDistance)
+          : 0;
 
-      entry.currentLevel = sel.level;
-
-      if (sel.level === -1) {
+      if (entry.lod.level === -1) {
         entry.lod.budgetFrac = 0;
+        entry.lod.distanceBasis = null;
         continue;
       }
 
-      activeNow.push({ entry, rawBudget: tiers[sel.level].budgetFrac });
+      activeNow.push({ entry, rawBudget: tiers[entry.lod.level].budgetFrac });
     }
 
     // Phase 2: normalize budgetFrac across active layers.
