@@ -15,7 +15,7 @@ scene.add(sun);
 
 // Seed entries so search works before the layer lanes land (real data comes from each lane).
 register([
-  { id: 'star:sun', name: 'Sun', aliases: ['Sol'], kind: 'star', distanceM: 0, blurb: 'Our star.' },
+  { id: 'star:sol:sun', name: 'Sun', aliases: ['Sol'], kind: 'star', distanceM: 0, blurb: 'Our star.' },
 ]);
 mountSearch((id) => console.info('flyTo', id));
 
