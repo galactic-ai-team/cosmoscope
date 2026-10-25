@@ -129,11 +129,16 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const controls = new CosmoControls(camera, { reducedMotion });
 controls.attach(renderer.domElement);
 // Grabbing the view cancels a running flight and the Grand Tour.
-// Controls drop input while disabled (mid-flight), so listen on the canvas too.
-const grab = (): void => { tour.stop(); currentFlight?.cancel(); currentFlight = null; };
-controls.onUserInput(grab);
-renderer.domElement.addEventListener('pointerdown', grab);
-renderer.domElement.addEventListener('wheel', grab, { passive: true });
+// Claude's CosmoControls calls onUserInput even while disabled (PR #18), so no
+// extra canvas listeners are needed (snippet from Claude, Dee's cancelFlight()).
+controls.onUserInput(() => {
+  tour.stop();
+  if (flight.flying) {
+    flight.cancelFlight();
+    controls.enabled = true; // so this same input applies
+  }
+  currentFlight = null;
+});
 
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
