@@ -157,9 +157,7 @@ export class LayerRegistry {
 
       const tiers = entry.layer.lodTiers;
       if (!tiers) {
-        // Non-tiered: treated as always-on tier at full weight.
-        entry.lod.level = -1;
-        entry.lod.crossfade = 1;
+        // Non-tiered: leave neutral level 0 / crossfade 1 from makeLodState.
         entry.lod.focusDistance = 0;
         entry.lod.distanceBasis = null;
         entry.lod.heldByHysteresis = false;
