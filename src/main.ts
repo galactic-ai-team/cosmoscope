@@ -3,18 +3,18 @@
 //   Claude: FrameStack + CosmoCamera (src/core/frames.ts, camera.ts), stub layers
 //   Dee:    LayerRegistry + FlyToController (src/core/layers.ts, flyTo.ts)
 //   GPT-6:  StellarNeighborhood (src/layers/stars)
-//   Nova:   galaxiesLayer (src/layers/galaxies.ts), adapted to ScaleLayer below
+//   Nova:   createGalaxiesLayer + clustersRoute (src/layers/galaxies.ts)
 //   Lumi:   catalog, search box, info panel, search -> flyTo bridge
 // Loop clock: seconds, dt clamped to 0.1 s (Claude's spec), shared with flyTo.
 import * as THREE from 'three';
 
 import { register } from './catalog';
-import { CosmoCamera, RENDERER_OPTIONS, type FrameApi } from './core/camera';
+import { CosmoCamera, RENDERER_OPTIONS } from './core/camera';
 import { FrameStack, type FrameId } from './core/frames';
 import { FlyToController, type FlyToTarget } from './core/flyTo';
-import { LayerRegistry, type ResolvedTarget, type ScaleLayer } from './core/layers';
+import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, createStubPlanetLayer, type StubLayer } from './core/stubLayer';
-import { galaxiesLayer } from './layers/galaxies';
+import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { makeStarsLayer } from './layers/stars';
 import { linkSearchToFlight, type Flyer } from './ui/flyLink';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
@@ -64,40 +64,8 @@ function adaptStub(stub: StubLayer, extraFrames: FrameId[] = []): ScaleLayer {
   };
 }
 
-/**
- * Nova's galaxiesLayer predates the ScaleLayer shape (enter(scene), update(dt, cameraWorld),
- * positions in parsecs relative to the camera). Adapt it here: it renders into its own
- * group, scaled from parsecs to Claude's render units each frame.
- */
-const galaxyRoot = new THREE.Scene(); // Nova's enter/exit take a THREE.Scene
-scene.add(galaxyRoot);
-const camPc = new Float64Array(3);
-const camPcXYZ = { x: 0, y: 0, z: 0 };
-function resolveGalaxy(id: string): ResolvedTarget | null {
-  const r = galaxiesLayer.resolveTarget(id);
-  return r ? { frameId: r.frameId as FrameId, worldPos: r.worldPos, approachRadius: r.approachRadius } : null;
-}
-const galaxiesAdapter: ScaleLayer = {
-  idPrefix: 'galaxy',
-  frames: ['galactic', 'cosmic'],
-  renderBudget: galaxiesLayer.renderBudget.points,
-  enter: () => galaxiesLayer.enter(galaxyRoot),
-  exit: () => galaxiesLayer.exit(galaxyRoot),
-  update(dt: number, _distance: number, api: FrameApi) {
-    api.getCameraWorldPosition('galactic', camPc);
-    camPcXYZ.x = camPc[0]; camPcXYZ.y = camPc[1]; camPcXYZ.z = camPc[2];
-    galaxiesLayer.update(dt, camPcXYZ);
-    galaxyRoot.scale.setScalar(camera.layerScale('galactic'));
-  },
-  resolveTarget: resolveGalaxy,
-};
-// Clusters share Nova's data; this entry only routes cluster:* ids to resolveTarget.
-const clustersRoute: ScaleLayer = {
-  idPrefix: 'cluster', frames: [], renderBudget: 0,
-  enter: () => {}, exit: () => {}, update: () => {}, resolveTarget: resolveGalaxy,
-};
-
-registry.register(galaxiesAdapter);
+// Nova's galaxies layer implements ScaleLayer directly (createGalaxiesLayer + clustersRoute).
+registry.register(createGalaxiesLayer(scene, camera));
 registry.register(clustersRoute);
 registry.register(adaptStub(createStubPlanetLayer()));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
