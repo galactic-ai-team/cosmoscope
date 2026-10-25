@@ -22,6 +22,7 @@ import { makeZoneHud } from './ui/zone';
 import { linkSearchToFlight, kindFromId, flightKind, type Flyer } from './ui/flyLink';
 import { createTour } from './ui/tour';
 import { mountHelp } from './ui/help';
+import { mountConstellationToggle } from './ui/constellations';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
@@ -176,3 +177,5 @@ renderer.setAnimationLoop((ms: number) => {
 
 // Help overlay (Lumi): ? key or top-right button.
 mountHelp();
+// Constellation toggle (Lumi, GPT-6's handoff): C key or top-right button.
+mountConstellationToggle((mode) => stars.setConstellationMode(mode));
