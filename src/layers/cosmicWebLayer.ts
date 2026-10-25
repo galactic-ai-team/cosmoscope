@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { ScaleLayer } from '../core/layers';
 import { CosmoCamera } from '../core/camera';
 import { FrameId } from '../core/frames';
-import { METERS } from '../core/units';
 import { register, CatalogEntry } from '../catalog';
 
 interface CosmicGalaxyPoint {
@@ -125,7 +124,7 @@ export class CosmicWebLayer implements ScaleLayer {
     return this.camera.getCameraDistanceToOrigin();
   }
 
-  public resolveTarget(id: string) {
+  public resolveTarget(_id: string) {
     // Basic target resolution for 2MRS galaxies if searched
     return {
       frameId: 'cosmic' as FrameId,
