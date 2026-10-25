@@ -33,6 +33,7 @@ export function renderHelpHtml(items: readonly HelpItem[] = HELP_ITEMS): string 
 export function mountHelp(doc: Document = document): { toggle(open?: boolean): boolean } {
   const panel = doc.createElement('div');
   panel.id = 'help';
+  panel.dataset.labelExclude = '';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Help');
   panel.hidden = true;
@@ -43,6 +44,7 @@ export function mountHelp(doc: Document = document): { toggle(open?: boolean): b
   panel.innerHTML = renderHelpHtml();
   const btn = doc.createElement('button');
   btn.id = 'help-btn';
+  btn.dataset.labelExclude = '';
   btn.textContent = '?';
   btn.setAttribute('aria-label', 'Help');
   btn.style.cssText = 'position:fixed;z-index:6;top:16px;right:16px;width:34px;height:34px;border-radius:50%;'

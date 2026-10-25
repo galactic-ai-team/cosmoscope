@@ -21,11 +21,11 @@
 </head>
 <body>
 <div id="app"></div>
-<div id="search"><input type="search" placeholder="Search planets, stars, galaxies…" aria-label="Search the universe" autocomplete="off" /><ul role="listbox" hidden></ul></div>
-<aside id="info" hidden aria-live="polite"><button aria-label="Close">×</button><h2></h2><p></p><dl></dl></aside>
-<div id="zone" aria-live="polite"></div>
-<div id="scale"></div>
-<button id="tour" type="button" aria-pressed="false">Grand Tour</button>
+<div id="search" data-label-exclude><input type="search" placeholder="Search planets, stars, galaxies…" aria-label="Search the universe" autocomplete="off" /><ul role="listbox" hidden></ul></div>
+<aside id="info" data-label-exclude hidden aria-live="polite"><button aria-label="Close">×</button><h2></h2><p></p><dl></dl></aside>
+<div id="zone" data-label-exclude aria-live="polite"></div>
+<div id="scale" data-label-exclude></div>
+<button id="tour" data-label-exclude type="button" aria-pressed="false">Grand Tour</button>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
