@@ -1,15 +1,17 @@
 import * as THREE from 'three';
-import { ScaleLayer, LayerApi } from '../core/layers';
+import { ScaleLayer } from '../core/layers';
+import { FrameApi } from '../core/camera';
+import { FrameId } from '../core/frames';
 
 interface PlanetData {
   name: string;
   id: string;
   radius: number; // thousand km
-  semiMajorAxis: number; // AU (Keplerian element a)
-  eccentricity: number; // orbital eccentricity (e)
-  inclination: number; // orbital inclination in degrees (i)
-  meanAnomaly0: number; // mean anomaly at epoch in degrees (M0)
-  meanMotion: number; // degrees per Earth day (n)
+  semiMajorAxis: number; // AU
+  eccentricity: number; // orbital eccentricity
+  inclination: number; // orbital inclination in degrees
+  meanAnomaly0: number; // mean anomaly at epoch in degrees
+  meanMotion: number; // degrees per Earth day
   orbitPeriod: number; // Earth years
   color: number;
   moons?: { name: string; id: string; distance: number; radius: number; color: number; speed: number }[];
@@ -57,10 +59,10 @@ const PLANETS: PlanetData[] = [
 
 export class SolarSystemLayer implements ScaleLayer {
   public idPrefix = 'planet:';
-  public frames = ['heliocentric'];
+  public frames: FrameId[] = ['heliocentric'];
   public minZoom = 1e3;
   public maxZoom = 1e12;
-  public renderBudget = 'low' as const;
+  public renderBudget = 10;
 
   private container: THREE.Group;
   private planetMeshes: { 
@@ -70,10 +72,11 @@ export class SolarSystemLayer implements ScaleLayer {
     eccentricity: number; 
     meanAnomaly0: number; 
     meanMotion: number;
+    radius: number;
     moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
-  private api: LayerApi | null = null;
+  private api: FrameApi | null = null;
   private simTimeDays = 0;
 
   constructor() {
@@ -81,7 +84,7 @@ export class SolarSystemLayer implements ScaleLayer {
     this.container.name = 'SolarSystemLayer';
   }
 
-  public enter(api: LayerApi): void {
+  public enter(api: FrameApi): void {
     this.api = api;
     const scene = api.scene;
 
@@ -180,6 +183,7 @@ export class SolarSystemLayer implements ScaleLayer {
         eccentricity: data.eccentricity,
         meanAnomaly0: data.meanAnomaly0,
         meanMotion: data.meanMotion,
+        radius: scaledRadius,
         moons: moonEntries
       });
     });
@@ -187,8 +191,7 @@ export class SolarSystemLayer implements ScaleLayer {
     scene.add(this.container);
   }
 
-  public update(dt: number, _distance: number, _api: LayerApi): void {
-    // Advance simulation time (accelerated seconds to days)
+  public update(dt: number): void {
     this.simTimeDays += dt * 5.0;
 
     if (this.sunMesh) {
@@ -196,16 +199,13 @@ export class SolarSystemLayer implements ScaleLayer {
     }
 
     this.planetMeshes.forEach((item) => {
-      // Keplerian mean anomaly propagation: M = M0 + n * t
       const M = (item.meanAnomaly0 + item.meanMotion * this.simTimeDays) * (Math.PI / 180);
       
-      // Kepler's Equation approximation for eccentric anomaly E (E - e*sin(E) = M)
       let E = M;
       for (let iter = 0; iter < 3; iter++) {
         E = M + item.eccentricity * Math.sin(E);
       }
 
-      // True anomaly v and heliocentric distance r
       const xv = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
       const zv = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
 
@@ -221,18 +221,28 @@ export class SolarSystemLayer implements ScaleLayer {
     });
   }
 
-  public resolveTarget(id: string): THREE.Vector3 | null {
+  public resolveTarget(id: string) {
     const found = this.planetMeshes.find(p => p.mesh.name === id);
     if (found) {
-      return found.mesh.position;
+      const worldPos = new Float64Array([found.mesh.position.x, found.mesh.position.y, found.mesh.position.z]);
+      return {
+        frameId: 'heliocentric' as FrameId,
+        worldPos,
+        approachRadius: found.radius * 3.0
+      };
     }
     if (id === 'star:sol:sun' && this.sunMesh) {
-      return this.sunMesh.position;
+      const worldPos = new Float64Array([this.sunMesh.position.x, this.sunMesh.position.y, this.sunMesh.position.z]);
+      return {
+        frameId: 'heliocentric' as FrameId,
+        worldPos,
+        approachRadius: 45.0
+      };
     }
     return null;
   }
 
-  public exit(_scene: THREE.Scene): void {
+  public exit(): void {
     if (this.container.parent) {
       this.container.parent.remove(this.container);
     }
@@ -250,4 +260,3 @@ export class SolarSystemLayer implements ScaleLayer {
     }
   }
 }
-
