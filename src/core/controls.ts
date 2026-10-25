@@ -12,6 +12,10 @@
 //     notch is the same RELATIVE zoom at 1 m and at 1e26 m.
 //   - Damping: input accumulates and eases in over ~0.1 s; reducedMotion
 //     applies it immediately.
+//   - Roll: when the camera's up differs from the orbit axis (after a flight,
+//     or a setUp() call), the camera's up eases onto the axis over ~0.3 s,
+//     even with no input; reducedMotion snaps it. A drag during the ease
+//     continues from the partly eased up rather than snapping first.
 //   - No target, no orbit: controls do nothing until something is targeted.
 //
 // main.ts wiring:
@@ -45,6 +49,8 @@ export interface ControlsOptions {
   maxDistance?: number;
   /** Easing time constant in seconds. */
   damping?: number;
+  /** Time constant (s) for easing the camera's up onto the orbit axis; ~3x this to settle. */
+  upEase?: number;
   /** prefers-reduced-motion: no easing, input applies at once. */
   reducedMotion?: boolean;
 }
@@ -72,6 +78,7 @@ export class CosmoControls {
   private readonly minDistance: number;
   private readonly maxDistance: number;
   private readonly damping: number;
+  private readonly upEase: number;
 
   // Pending input, eased in by update().
   private pendingYaw = 0;
@@ -86,6 +93,7 @@ export class CosmoControls {
   private readonly tgt = new Float64Array(3);
   private readonly off = new Float64Array(3);
   private readonly axis = new Float64Array(3);
+  private readonly curUp = new Float64Array(3);
 
   constructor(
     private readonly camera: FrameApi,
@@ -97,6 +105,7 @@ export class CosmoControls {
     this.minDistance = opts.minDistance ?? 1;
     this.maxDistance = opts.maxDistance ?? 1e27;
     this.damping = opts.reducedMotion ? 0 : (opts.damping ?? 0.08);
+    this.upEase = opts.reducedMotion ? 0 : (opts.upEase ?? 0.1);
   }
 
   setUp(up: ArrayLike<number>): void {
@@ -161,7 +170,15 @@ export class CosmoControls {
       this.stop();
       return;
     }
-    if (this.pendingYaw === 0 && this.pendingPitch === 0 && this.pendingLogZoom === 0) return;
+    const rolled = this.easeUp(dt);
+    if (this.pendingYaw === 0 && this.pendingPitch === 0 && this.pendingLogZoom === 0) {
+      if (rolled) {
+        const frame = this.camera.getFrameId();
+        this.camera.getCameraWorldPosition(frame, this.cam);
+        this.camera.setPose({ frame, position: this.cam, up: this.curUp });
+      }
+      return;
+    }
 
     const k = this.damping <= 0 ? 1 : 1 - Math.exp(-Math.max(dt, 0) / this.damping);
     let yaw = this.pendingYaw * k;
@@ -231,7 +248,47 @@ export class CosmoControls {
     this.cam[0] = this.tgt[0] + o[0] * s;
     this.cam[1] = this.tgt[1] + o[1] * s;
     this.cam[2] = this.tgt[2] + o[2] * s;
-    this.camera.setPose({ frame, position: this.cam, up: this.up });
+    this.camera.setPose({ frame, position: this.cam, up: this.curUp });
+  }
+
+  /**
+   * Move the camera's up (read into curUp) toward the orbit axis. Returns
+   * true if curUp differs from the camera's current up and must be applied.
+   * The orbit math itself always uses the target axis (this.up), so pole
+   * clamping stays well defined while the roll catches up.
+   */
+  private easeUp(dt: number): boolean {
+    const c = this.curUp;
+    const t = this.up;
+    this.camera.getCameraUp(c);
+    const dot = clamp(c[0] * t[0] + c[1] * t[1] + c[2] * t[2], -1, 1);
+    if (dot >= 1 - 1e-12) return false;
+    const angle = Math.acos(dot);
+    if (this.upEase <= 0 || angle < 1e-4) {
+      c[0] = t[0];
+      c[1] = t[1];
+      c[2] = t[2];
+      return true;
+    }
+    const a = this.axis;
+    a[0] = c[1] * t[2] - c[2] * t[1];
+    a[1] = c[2] * t[0] - c[0] * t[2];
+    a[2] = c[0] * t[1] - c[1] * t[0];
+    let alen = Math.hypot(a[0], a[1], a[2]);
+    if (alen < 1e-12) {
+      // Exactly opposite: any axis perpendicular to c will do.
+      const helper = Math.abs(c[0]) < 0.9 ? 0 : 1;
+      a[0] = helper === 0 ? 0 : -c[2];
+      a[1] = helper === 0 ? c[2] : 0;
+      a[2] = helper === 0 ? -c[1] : c[0];
+      alen = Math.hypot(a[0], a[1], a[2]);
+    }
+    a[0] /= alen;
+    a[1] /= alen;
+    a[2] /= alen;
+    // Rotating c about (c x t) by a positive angle moves it toward t.
+    rodrigues(c, a, angle * (1 - Math.exp(-Math.max(dt, 0) / this.upEase)));
+    return true;
   }
 
   // ---- DOM ------------------------------------------------------------------

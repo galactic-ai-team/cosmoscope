@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CosmoCamera } from '../../src/core/camera';
 import { CosmoControls } from '../../src/core/controls';
-import { FrameStack, METERS, type FrameId } from '../../src/core/frames';
+import { ECLIPTIC_NORTH, FrameStack, METERS, OBLIQUITY_J2000, type FrameId } from '../../src/core/frames';
 
 function rig(frame: FrameId = 'helio', camPos = [0, -10, 0], target = [0, 0, 0]) {
   const cam = new CosmoCamera(new FrameStack());
@@ -202,5 +202,80 @@ describe('CosmoControls DOM binding', () => {
     el.dispatchEvent(ev('pointermove', { pointerId: 2, clientX: 200, clientY: 0 })); // spread doubles
     controls.update(1 / 60);
     expect(len(offset(cam))).toBeCloseTo(5, 6); // zoomed in 2x
+  });
+});
+
+describe('CosmoControls roll easing (camera up -> orbit axis)', () => {
+  function upAngle(cam: CosmoCamera, target: ArrayLike<number>): number {
+    const u = cam.getCameraUp();
+    return Math.acos(Math.min(1, u[0] * target[0] + u[1] * target[1] + u[2] * target[2]));
+  }
+  const TILT = OBLIQUITY_J2000; // angle between the celestial pole and ecliptic north
+
+  function arrived(opts: { reducedMotion?: boolean } = {}) {
+    // Camera arrives with up = celestial pole; the flight set the axis to ecliptic north.
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setPose({ frame: 'helio', position: [0, -10, 0], target: { frame: 'helio', position: [0, 0, 0] }, up: [0, 0, 1] });
+    const controls = new CosmoControls(cam, opts);
+    controls.setUp(ECLIPTIC_NORTH);
+    return { cam, controls };
+  }
+
+  it('eases the ~23 deg roll over ~0.3 s with no input, without moving the camera', () => {
+    const { cam, controls } = arrived();
+    const before = Array.from(cam.getCameraWorldPosition());
+    expect(upAngle(cam, ECLIPTIC_NORTH)).toBeCloseTo(TILT, 6);
+    controls.update(1 / 60);
+    const afterOne = upAngle(cam, ECLIPTIC_NORTH);
+    expect(afterOne).toBeGreaterThan(TILT * 0.8); // no snap on the first frame
+    expect(afterOne).toBeLessThan(TILT);
+    for (let i = 1; i < 18; i++) controls.update(1 / 60); // 0.3 s total
+    expect(upAngle(cam, ECLIPTIC_NORTH)).toBeLessThan(TILT * 0.06);
+    for (let i = 0; i < 120; i++) controls.update(1 / 60);
+    expect(upAngle(cam, ECLIPTIC_NORTH)).toBeLessThan(1e-6); // acos resolves ~1e-8 near zero
+    expect(Array.from(cam.getCameraWorldPosition())).toEqual(before);
+  });
+
+  it('goes idle once aligned', () => {
+    const { cam, controls } = arrived();
+    for (let i = 0; i < 200; i++) controls.update(1 / 60);
+    const spy = vi.spyOn(cam, 'setPose');
+    controls.update(1 / 60);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('snaps immediately under reduced motion', () => {
+    const { cam, controls } = arrived({ reducedMotion: true });
+    controls.update(1 / 60);
+    expect(upAngle(cam, ECLIPTIC_NORTH)).toBeLessThan(1e-7);
+  });
+
+  it('does not touch the camera while disabled (a flight owns it)', () => {
+    const { cam, controls } = arrived();
+    controls.enabled = false;
+    controls.update(1 / 60);
+    expect(upAngle(cam, ECLIPTIC_NORTH)).toBeCloseTo(TILT, 9);
+  });
+
+  it('a drag during the ease continues from the partly eased up, not a snap', () => {
+    const { cam, controls } = arrived();
+    for (let i = 0; i < 3; i++) controls.update(1 / 60);
+    const mid = upAngle(cam, ECLIPTIC_NORTH);
+    controls.rotate(40, 0);
+    controls.update(1 / 60);
+    const next = upAngle(cam, ECLIPTIC_NORTH);
+    expect(next).toBeGreaterThan(0.5 * mid); // still easing, not snapped
+    expect(next).toBeLessThan(mid);
+    expect(len(offset(cam))).toBeCloseTo(10, 6); // orbit still keeps distance
+  });
+
+  it('handles an exactly opposite up without NaN', () => {
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setPose({ frame: 'helio', position: [0, -10, 0], target: { frame: 'helio', position: [0, 0, 0] }, up: [0, 0, -1] });
+    const controls = new CosmoControls(cam);
+    for (let i = 0; i < 240; i++) controls.update(1 / 60);
+    const u = cam.getCameraUp();
+    expect(u.every(Number.isFinite)).toBe(true);
+    expect(u[2]).toBeCloseTo(1, 6);
   });
 });
