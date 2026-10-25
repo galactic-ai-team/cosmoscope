@@ -16,6 +16,7 @@ import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, createStubPlanetLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { makeStarsLayer } from './layers/stars';
+import { linkDeepLinks } from './ui/deepLink';
 import { linkSearchToFlight, type Flyer } from './ui/flyLink';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
@@ -73,7 +74,7 @@ registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
 // only if it already exists. Missing HYG JSON is not fatal: the layer still resolves the Sun.
 const stars = makeStarsLayer(scene, camera);
-stars.load(HYG_URL)
+const starsReady = stars.load(HYG_URL)
   .then((n) => console.info(`stars: ${n} HYG stars loaded`))
   .catch((err) => console.warn(`stars: HYG data unavailable (${HYG_URL}), running without the star field`, err))
   .finally(() => registry.register(stars));
@@ -96,7 +97,10 @@ const flyer: Flyer = {
     return flight.flyTo(t, at ?? now);
   },
 };
-mountSearch(linkSearchToFlight(flyer, showInfoById, undefined, () => now), false);
+const flyToPick = linkSearchToFlight(flyer, showInfoById, undefined, () => now);
+// Deep links (#to=<id>): fly there once stars have loaded; each pick updates the URL.
+const recordPick = linkDeepLinks(flyToPick, starsReady);
+mountSearch((id) => { recordPick(id); flyToPick(id); }, false);
 
 // ---- simple navigation: wheel = log zoom toward target, drag = orbit ---------
 const tmpTarget = new Float64Array(3);
