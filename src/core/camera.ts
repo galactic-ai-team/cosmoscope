@@ -57,6 +57,8 @@ export interface FrameApi {
   toFrame(point: Vec3Like, from: FrameId, to: FrameId, out?: Float64Array): Float64Array;
   setPose(pose: Pose): void;
   lookAt(point: Vec3Like, frameId?: FrameId): void;
+  getTargetPosition(frameId?: FrameId, out?: Float64Array): Float64Array | null;
+  getCameraForward(out?: Float64Array): Float64Array;
   distanceTo(point: FramedPoint): number;
   onRebase(listener: RebaseListener): () => void;
 }
@@ -150,6 +152,40 @@ export class CosmoCamera implements FrameApi {
     copy3(point, this.targetPos);
     this.refreshScale();
   }
+  /**
+   * The current target expressed in `frameId` units (default: the camera's
+   * own frame), or null if nothing has been targeted yet. Pass `out` to
+   * avoid allocating.
+   */
+  getTargetPosition(frameId: FrameId = this.frameId, out?: Float64Array): Float64Array | null {
+    if (this.targetFrame === null) return null;
+    return this.frames.toFrame(this.targetPos, this.targetFrame, frameId, out ?? new Float64Array(3));
+  }
+
+  /**
+   * Unit vector from the camera toward its target, in the shared ICRS axes
+   * (the same in every frame). Falls back to the three.js camera's facing
+   * when there is no target or the camera sits on it. Pass `out` to avoid
+   * allocating.
+   */
+  getCameraForward(out: Float64Array = new Float64Array(3)): Float64Array {
+    if (this.targetFrame !== null) {
+      const rel = this.relative(this.targetPos, this.targetFrame, out);
+      const len = Math.hypot(rel[0], rel[1], rel[2]);
+      if (len > 0) {
+        rel[0] /= len;
+        rel[1] /= len;
+        rel[2] /= len;
+        return rel;
+      }
+    }
+    const d = this.three.getWorldDirection(this.sVec);
+    out[0] = d.x;
+    out[1] = d.y;
+    out[2] = d.z;
+    return out;
+  }
+
   getTarget(out: Float64Array = new Float64Array(3)): FramedPoint | null {
     if (this.targetFrame === null) return null;
     copy3(this.targetPos, out);
