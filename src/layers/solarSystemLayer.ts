@@ -33,7 +33,7 @@ const PLANETS: PlanetData[] = [
     orbitPeriod: 1.0, 
     color: 0x2233ff, 
     moons: [
-      { name: 'Moon', id: 'moon:earth-moon', distance: 0.05, radius: 1.73, color: 0xaaaaaa, speed: 12.0 }
+      { name: 'Moon', id: 'moon:earth-moon', distance: 0.02, radius: 1.73, color: 0xaaaaaa, speed: 12.0 }
     ] 
   },
   { 
@@ -48,8 +48,8 @@ const PLANETS: PlanetData[] = [
     orbitPeriod: 1.88, 
     color: 0xc1440e, 
     moons: [
-      { name: 'Phobos', id: 'moon:phobos', distance: 0.025, radius: 0.6, color: 0x887766, speed: 20.0 },
-      { name: 'Deimos', id: 'moon:deimos', distance: 0.04, radius: 0.4, color: 0x776655, speed: 15.0 }
+      { name: 'Phobos', id: 'moon:phobos', distance: 0.015, radius: 0.6, color: 0x887766, speed: 20.0 },
+      { name: 'Deimos', id: 'moon:deimos', distance: 0.025, radius: 0.4, color: 0x776655, speed: 15.0 }
     ] 
   },
   { name: 'Jupiter', id: 'planet:jupiter', radius: 69.9, semiMajorAxis: 5.204, eccentricity: 0.0484, inclination: 1.30, meanAnomalyJ2000: 20.020, meanMotion: 0.0830853, orbitPeriod: 11.86, color: 0xb07f35 },
@@ -69,11 +69,11 @@ export class SolarSystemLayer implements ScaleLayer {
   private planetMeshes: { 
     mesh: THREE.Mesh; 
     pivot: THREE.Group; 
-    semiMajorAxis: number; // in AU for helio calculations
+    semiMajorAxis: number; 
     eccentricity: number; 
     meanAnomalyJ2000: number; 
     meanMotion: number;
-    radius: number;
+    approachRadius: number;
     moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
@@ -86,7 +86,7 @@ export class SolarSystemLayer implements ScaleLayer {
     this.container = new THREE.Group();
     this.container.name = 'SolarSystemLayer';
 
-    // Compute exact days elapsed from J2000.0 epoch (Jan 1, 2000, 12:00 TT) to current date
+    // Compute exact days elapsed from J2000.0 epoch to current date
     const j2000Epoch = Date.UTC(2000, 0, 1, 12, 0, 0);
     const now = Date.now();
     this.daysSinceJ2000 = (now - j2000Epoch) / (1000 * 60 * 60 * 24);
@@ -98,36 +98,37 @@ export class SolarSystemLayer implements ScaleLayer {
     if (this.isInitialized) return;
     this.isInitialized = true;
 
-    // 1. Create Sun (at origin in helio frame = 0 AU)
-    const sunGeo = new THREE.SphereGeometry(15, 32, 32);
+    // 1. Create Sun at origin (0,0,0) AU with minimum visible radius in AU space
+    const sunRadiusAU = 0.08;
+    const sunGeo = new THREE.SphereGeometry(sunRadiusAU, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
     this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
     this.sunMesh.name = 'star:sol:sun';
     this.container.add(this.sunMesh);
 
     // Sun light
-    const sunLight = new THREE.PointLight(0xffffff, 2, 1000);
+    const sunLight = new THREE.PointLight(0xffffff, 2, 50);
     this.container.add(sunLight);
 
     const catalogEntries: CatalogEntry[] = [];
 
-    // 2. Create Planets and Moons
+    // 2. Create Planets and Moons positioned in pure AU coordinates
     PLANETS.forEach((data) => {
       const pivot = new THREE.Group();
       this.container.add(pivot);
 
-      // Visual scaling factor: 1 AU = 25 scene units
-      const scaledDist = data.semiMajorAxis * 25; 
-      const scaledRadius = Math.max(data.radius * 0.2, 0.8);
+      const auDist = data.semiMajorAxis; 
+      // Ensure minimum visible on-screen size in AU coordinate space so small planets remain clear
+      const auRadius = Math.max(data.radius * 0.002, 0.025);
 
-      const planetGeo = new THREE.SphereGeometry(scaledRadius, 24, 24);
+      const planetGeo = new THREE.SphereGeometry(auRadius, 24, 24);
       const planetMat = new THREE.MeshStandardMaterial({ 
         color: data.color,
         roughness: 0.8,
         metalness: 0.1
       });
       const planetMesh = new THREE.Mesh(planetGeo, planetMat);
-      planetMesh.position.x = scaledDist;
+      planetMesh.position.x = auDist;
       planetMesh.name = data.id;
       pivot.add(planetMesh);
 
@@ -139,13 +140,13 @@ export class SolarSystemLayer implements ScaleLayer {
         blurb: `${data.name} is a planet in our Solar System.`
       });
 
-      // Orbit line visualization
+      // Orbit line in AU
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
       const segments = 128;
       for (let i = 0; i <= segments; i++) {
         const theta = (i / segments) * Math.PI * 2;
-        points.push(new THREE.Vector3(Math.cos(theta) * scaledDist, 0, Math.sin(theta) * scaledDist));
+        points.push(new THREE.Vector3(Math.cos(theta) * auDist, 0, Math.sin(theta) * auDist));
       }
       orbitGeo.setFromPoints(points);
       const orbitMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 });
@@ -159,18 +160,19 @@ export class SolarSystemLayer implements ScaleLayer {
           const moonPivot = new THREE.Group();
           planetMesh.add(moonPivot);
 
-          const moonGeo = new THREE.SphereGeometry(Math.max(moonData.radius * 0.3, 0.4), 16, 16);
+          const moonAuRadius = Math.max(moonData.radius * 0.0015, 0.01);
+          const moonGeo = new THREE.SphereGeometry(moonAuRadius, 16, 16);
           const moonMat = new THREE.MeshStandardMaterial({ color: moonData.color });
           const moonMesh = new THREE.Mesh(moonGeo, moonMat);
-          const moonDist = scaledRadius + moonData.distance * 4;
-          moonMesh.position.x = moonDist;
+          const moonAuDist = auRadius + moonData.distance;
+          moonMesh.position.x = moonAuDist;
           moonPivot.add(moonMesh);
 
           catalogEntries.push({
             id: moonData.id,
             name: moonData.name,
             kind: 'planet',
-            distanceM: (data.semiMajorAxis * 1.496e11) + (moonData.distance * 1.496e10),
+            distanceM: (data.semiMajorAxis * 1.496e11) + (moonData.distance * 1.496e11),
             blurb: `Natural satellite of ${data.name}.`
           });
 
@@ -181,11 +183,11 @@ export class SolarSystemLayer implements ScaleLayer {
       this.planetMeshes.push({
         mesh: planetMesh,
         pivot: pivot,
-        semiMajorAxis: data.semiMajorAxis, // Store true AU value for resolveTarget
+        semiMajorAxis: data.semiMajorAxis,
         eccentricity: data.eccentricity,
         meanAnomalyJ2000: data.meanAnomalyJ2000,
         meanMotion: data.meanMotion,
-        radius: scaledRadius,
+        approachRadius: auRadius * 3.0,
         moons: moonEntries
       });
     });
@@ -200,7 +202,6 @@ export class SolarSystemLayer implements ScaleLayer {
   }
 
   public update(dt: number): void {
-    // Advance simulation time matching real-world date progression + playback delta
     this.daysSinceJ2000 += dt * 5.0;
 
     if (this.sunMesh) {
@@ -208,7 +209,6 @@ export class SolarSystemLayer implements ScaleLayer {
     }
 
     this.planetMeshes.forEach((item) => {
-      // Accurate Keplerian propagation from J2000 epoch: M = M0 + n * t
       const M = (item.meanAnomalyJ2000 + item.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
       
       let E = M;
@@ -216,13 +216,12 @@ export class SolarSystemLayer implements ScaleLayer {
         E = M + item.eccentricity * Math.sin(E);
       }
 
-      // Compute positions in visual scene units (semiMajorAxis * 25)
-      const visualSemiMajor = item.semiMajorAxis * 25;
-      const xv = visualSemiMajor * (Math.cos(E) - item.eccentricity);
-      const zv = visualSemiMajor * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
+      // Compute exact heliocentric positions in AU
+      const xAU = item.semiMajorAxis * (Math.cos(E) - item.eccentricity);
+      const zAU = item.semiMajorAxis * Math.sqrt(1 - item.eccentricity * item.eccentricity) * Math.sin(E);
 
-      item.mesh.position.x = xv;
-      item.mesh.position.z = zv;
+      item.mesh.position.x = xAU;
+      item.mesh.position.z = zAU;
       item.mesh.rotation.y += dt * 0.5;
 
       if (item.moons) {
@@ -237,7 +236,6 @@ export class SolarSystemLayer implements ScaleLayer {
     const planetIndex = PLANETS.findIndex(p => p.id === id);
     if (planetIndex !== -1) {
       const data = PLANETS[planetIndex];
-      // Compute exact Keplerian heliocentric position in AU for the fly-to camera target
       const M = (data.meanAnomalyJ2000 + data.meanMotion * this.daysSinceJ2000) * (Math.PI / 180);
       let E = M;
       for (let iter = 0; iter < 3; iter++) {
@@ -247,8 +245,8 @@ export class SolarSystemLayer implements ScaleLayer {
       const zAU = data.semiMajorAxis * Math.sqrt(1 - data.eccentricity * data.eccentricity) * Math.sin(E);
 
       const worldPos = new Float64Array([xAU, 0, zAU]);
-      // Approach radius in AU (approx proportional to physical radius scaled to AU space)
-      const approachRadius = Math.max(data.radius / 1.496e8 * 10, 0.05);
+      const foundMesh = this.planetMeshes.find(p => p.mesh.name === id);
+      const approachRadius = foundMesh ? foundMesh.approachRadius : 0.1;
 
       return {
         frameId: 'helio' as FrameId,
@@ -262,7 +260,7 @@ export class SolarSystemLayer implements ScaleLayer {
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius: 0.1
+        approachRadius: 0.2
       };
     }
 
