@@ -5,6 +5,7 @@ import {
   isLabelBlocked,
   type LabelRect,
 } from './labelCollision';
+import { LabelExclusions } from './labelExclusions';
 
 const MAX_LABELS = 24;
 const MAX_LABEL_DISTANCE_LY = 1_500;
@@ -35,25 +36,7 @@ export class StellarLabels {
   private readonly labels: StarLabel[] = [];
   private readonly occupied: LabelRect[] = [];
 
-  private readonly exclusions: LabelRect[] = [];
-  private exclusionCount = 0;
-
-  // Reusable rectangles. The array grows only when more
-  // exclusion elements are discovered than before.
-  private acquireExclusion(index: number): LabelRect {
-    if (!this.exclusions[index]) {
-      const rect = {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-      };
-
-      this.exclusions.push(rect);
-    }
-
-    return this.exclusions[index];
-  }
+  private exclusionCache: LabelExclusions | null = null;
 
   private readonly scratch = new THREE.Vector3();
   private readonly cameraSpace = new THREE.Vector3();
@@ -66,8 +49,14 @@ export class StellarLabels {
     this.object3D.name = 'stellar-labels';
   }
 
+  startExclusionCache(doc: Document = document): void {
+    this.exclusionCache?.dispose();
+    this.exclusionCache = new LabelExclusions(doc);
+    this.exclusionCache.start();
+  }
+
   build(rows: readonly HygRow[]): void {
-    this.dispose();
+    this.clearLabels();
 
     const selected = rows
       .filter(row =>
@@ -161,35 +150,10 @@ export class StellarLabels {
       viewport?.height ?? document.documentElement.clientHeight;
 
     this.occupied.length = 0;
-    this.exclusionCount = 0;
 
-    const elements = document.querySelectorAll<HTMLElement>(
-      '[data-label-exclude]',
-    );
-
-    for (const el of elements) {
-      if (
-        el.hidden ||
-        getComputedStyle(el).display === 'none'
-      ) {
-        continue;
-      }
-
-      const bounds = el.getBoundingClientRect();
-
-      if (bounds.width <= 0 || bounds.height <= 0) {
-        continue;
-      }
-
-      const zone = this.acquireExclusion(
-        this.exclusionCount++,
-      );
-
-      zone.left = bounds.left;
-      zone.top = bounds.top;
-      zone.right = bounds.right;
-      zone.bottom = bounds.bottom;
-    }
+    const exclusionState = this.exclusionCache?.read();
+    const exclusions = exclusionState?.rects ?? [];
+    const exclusionCount = exclusionState?.count ?? 0;
 
     for (const label of this.labels) {
       const { sprite, material, position } = label;
@@ -261,8 +225,8 @@ export class StellarLabels {
         isLabelBlocked(
           rect,
           this.occupied,
-          this.exclusions,
-          this.exclusionCount,
+          exclusions,
+          exclusionCount,
         )
       ) {
         continue;
@@ -278,7 +242,7 @@ export class StellarLabels {
     this.object3D.visible = visible;
   }
 
-  dispose(): void {
+  private clearLabels(): void {
     for (const label of this.labels) {
       label.sprite.removeFromParent();
       label.material.dispose();
@@ -287,5 +251,11 @@ export class StellarLabels {
 
     this.labels.length = 0;
     this.occupied.length = 0;
+  }
+
+  dispose(): void {
+    this.clearLabels();
+    this.exclusionCache?.dispose();
+    this.exclusionCache = null;
   }
 }
