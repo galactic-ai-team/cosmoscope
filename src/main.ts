@@ -122,6 +122,7 @@ const flyer: Flyer = {
       });
       // Solar-system arrivals orbit around ecliptic north (Claude's idea, Lumi).
       controls.setUp(orbitUpFor(r.frameId));
+      controls.setMinDistance(r.radius ? 1.05 * r.radius * camera.unitsPerFrame(r.frameId) : 0);
     }
     starGlow.setFocus(r && t.id.startsWith('star:') ? { frame: r.frameId, position: r.worldPos } : null);
     currentFlight = flight.flyTo(t, at ?? now);
