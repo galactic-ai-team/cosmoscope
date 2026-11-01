@@ -31,8 +31,10 @@ export class CosmicWebLayer implements ScaleLayer {
   private camera: CosmoCamera;
   private container: THREE.Group;
   private pointsMesh: THREE.Points | null = null;
+  private pointsGeometry: THREE.BufferGeometry | null = null;
   private pointsMaterial: THREE.PointsMaterial | null = null;
-  private galaxyPoints: CosmicGalaxyPoint[] = [];
+  private pointTexture: THREE.CanvasTexture | null = null;
+  private galaxyMap = new Map<string, CosmicGalaxyPoint>();
 
   constructor(scene: THREE.Scene, camera: CosmoCamera) {
     this.scene = scene;
@@ -48,7 +50,6 @@ export class CosmicWebLayer implements ScaleLayer {
         throw new Error(`Failed to load cosmic web data: ${response.statusText}`);
       }
       const data: CosmicWebData = await response.json();
-      this.galaxyPoints = data.points;
       this.buildCosmicWeb(data.points);
       return data.points.length;
     } catch (err) {
@@ -57,8 +58,24 @@ export class CosmicWebLayer implements ScaleLayer {
     }
   }
 
+  private createSoftCircleTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.6)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
   private buildCosmicWeb(pointsData: CosmicGalaxyPoint[]): void {
-    const geometry = new THREE.BufferGeometry();
+    this.pointsGeometry = new THREE.BufferGeometry();
     const positions = new Float32Array(pointsData.length * 3);
     const catalogEntries: CatalogEntry[] = [];
 
@@ -72,9 +89,17 @@ export class CosmicWebLayer implements ScaleLayer {
       positions[i * 3 + 2] = z;
 
       const distMpc = Math.sqrt(x * x + y * y + z * z);
+      const uniqueId = `cosmicweb:2mrs:${i}`;
+
+      const galaxyPoint: CosmicGalaxyPoint = {
+        ...pt,
+        id: uniqueId
+      };
+
+      this.galaxyMap.set(uniqueId, galaxyPoint);
 
       catalogEntries.push({
-        id: pt.id || `cosmicweb:2mrs:${i}`,
+        id: uniqueId,
         name: pt.name || `2MRS Galaxy ${i}`,
         kind: 'galaxy',
         distanceM: distMpc * METERS.mpc,
@@ -82,19 +107,22 @@ export class CosmicWebLayer implements ScaleLayer {
       });
     });
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
+    this.pointTexture = this.createSoftCircleTexture();
     this.pointsMaterial = new THREE.PointsMaterial({
       color: 0x88ccff,
-      size: 1.8,
-      sizeAttenuation: true,
+      size: 3.5,
+      sizeAttenuation: false, // Prevents giant squares at extreme zoom out
       transparent: true,
       opacity: 0.0,
+      map: this.pointTexture,
+      alphaMap: this.pointTexture,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
 
-    this.pointsMesh = new THREE.Points(geometry, this.pointsMaterial);
+    this.pointsMesh = new THREE.Points(this.pointsGeometry, this.pointsMaterial);
     this.container.add(this.pointsMesh);
 
     register(catalogEntries);
@@ -106,15 +134,18 @@ export class CosmicWebLayer implements ScaleLayer {
     }
   }
 
-  public update(_dt: number, distanceMeters: number): void {
+  public update(_dt: number, _distanceMeters: number): void {
     if (!this.pointsMesh) return;
 
     // Camera-relative positioning for floating-origin precision in 'cosmic' frame
     this.camera.toCameraRelative(CosmicWebLayer.ORIGIN, 'cosmic', this.container.position);
     this.container.scale.setScalar(this.camera.layerScale('cosmic'));
 
-    // Convert distance from meters to Mpc for correct fade threshold calculations
-    const distanceMpc = distanceMeters / METERS.mpc;
+    // Robust physical distance in Mpc from cosmic origin
+    const distanceMpc = this.camera.distanceTo({
+      frame: 'cosmic',
+      position: CosmicWebLayer.ORIGIN,
+    }) / METERS.mpc;
 
     // Fade in past ~1 Mpc out to 50 Mpc cosmological distance
     const fadeStart = 1.0;
@@ -123,27 +154,39 @@ export class CosmicWebLayer implements ScaleLayer {
 
     if (this.pointsMaterial) {
       this.pointsMaterial.opacity = alpha * 0.85;
+      // Keep point size visually stable across scale steps
+      this.pointsMaterial.size = Math.max(2.0, Math.min(5.0, 3.5 * this.camera.layerScale('cosmic')));
     }
   }
 
   public lodLevel(): number {
-    // Return discrete tier index based on camera distance in Mpc
-    const distMpc = this.camera.getCameraDistanceToOrigin() / METERS.mpc;
+    const distMpc = this.camera.distanceTo({
+      frame: 'cosmic',
+      position: CosmicWebLayer.ORIGIN,
+    }) / METERS.mpc;
+
     if (distMpc < 10) return 0;
     if (distMpc < 100) return 1;
     return 2;
   }
 
   public resolveTarget(id: string) {
-    const found = this.galaxyPoints.find(pt => pt.id === id || `cosmicweb:2mrs:${this.galaxyPoints.indexOf(pt)}` === id);
+    const found = this.galaxyMap.get(id);
     if (!found) return null;
 
     const worldPos = new Float64Array([found.xyz[0], found.xyz[1], found.xyz[2]]);
     return {
       frameId: 'cosmic' as FrameId,
       worldPos,
-      approachRadius: 2.5
+      approachRadius: 0.05 // 50 kpc in cosmic-frame Mpc
     };
+  }
+
+  public dispose(): void {
+    if (this.pointsGeometry) this.pointsGeometry.dispose();
+    if (this.pointsMaterial) this.pointsMaterial.dispose();
+    if (this.pointTexture) this.pointTexture.dispose();
+    this.galaxyMap.clear();
   }
 
   public exit(): void {
@@ -156,4 +199,3 @@ export class CosmicWebLayer implements ScaleLayer {
 export function createCosmicWebLayer(scene: THREE.Scene, camera: CosmoCamera): CosmicWebLayer {
   return new CosmicWebLayer(scene, camera);
 }
-
