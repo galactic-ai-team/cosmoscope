@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { FrameApi } from '../camera';
-import type { FrameId } from '../frames';
+import { METERS, type FrameId } from '../frames';
 import { LayerRegistry, type ResolvedTarget, type ScaleLayer } from '../layers';
 import { FlyToController } from '../flyTo';
 
@@ -56,6 +56,26 @@ function makeFakeApi(): FrameApi & {
       this.cameraPos[0] = pos[0];
       this.cameraPos[1] = pos[1];
       this.cameraPos[2] = pos[2];
+    },
+    // Lumi (#46, Dee's flag): flyTo now always stores the position in the
+    // camera's current frame and runs chooseFrame, so the fake implements
+    // setCameraWorldPosition/distanceTo/rebaseTo. Frames share one origin and
+    // unit here (see toFrame), so positions copy straight across; distanceTo
+    // returns METRES (fake units are parsecs, like the galactic frame).
+    setCameraWorldPosition(pos: Float64Array, _frame?: FrameId): void {
+      this.cameraPos[0] = pos[0];
+      this.cameraPos[1] = pos[1];
+      this.cameraPos[2] = pos[2];
+    },
+    rebaseTo(frame: FrameId): void {
+      this.frame = frame;
+    },
+    distanceTo(p: { frame: FrameId; position: ArrayLike<number> }): number {
+      return Math.hypot(
+        this.cameraPos[0] - p.position[0],
+        this.cameraPos[1] - p.position[1],
+        this.cameraPos[2] - p.position[2],
+      ) * METERS.pc;
     },
     lookAt(pos: Float64Array): void {
       // Set forward vector toward pos.
