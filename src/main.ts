@@ -26,7 +26,7 @@ import { mountHelp } from './ui/help';
 import { mountConstellationToggle } from './ui/constellations';
 import { mountHomeKey } from './ui/home';
 import { orbitUpFor } from './ui/orbitUp';
-import { chooseFrame } from './ui/frameSwitch';
+import { chooseFrame } from './core/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 
 const MAX_DT = 0.1;
