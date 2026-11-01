@@ -85,7 +85,7 @@ registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 const cosmicWebLayer = createCosmicWebLayer(scene, camera);
 registry.register(cosmicWebLayer);
 
-const cosmicWebReady = cosmicWebLayer.load()
+void cosmicWebLayer.load()
   .then((n) => console.info(`cosmic-web: ${n} 2MRS galaxies loaded`))
   .catch((err) => console.warn(`cosmic-web: data unavailable`, err));
 
