@@ -16,6 +16,7 @@ import { CosmoControls } from './core/controls';
 import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
+import { createCosmicWebLayer } from './layers/cosmicWebLayer';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
@@ -79,6 +80,14 @@ registry.register(createGalaxiesLayer(scene, camera));
 registry.register(clustersRoute);
 registry.register(new SolarSystemLayer(scene, camera));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
+
+// Register Cosmic Web layer
+const cosmicWebLayer = createCosmicWebLayer(scene, camera);
+registry.register(cosmicWebLayer);
+
+const cosmicWebReady = cosmicWebLayer.load()
+  .then((n) => console.info(`cosmic-web: ${n} 2MRS galaxies loaded`))
+  .catch((err) => console.warn(`cosmic-web: data unavailable`, err));
 
 // GPT-6's stars: register only after load settles, because enter() attaches the mesh
 // only if it already exists. Missing HYG JSON is not fatal: the layer still resolves the Sun.
