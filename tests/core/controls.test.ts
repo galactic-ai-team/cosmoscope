@@ -167,9 +167,8 @@ describe('CosmoControls DOM binding', () => {
 
   it('maps pointer drag, wheel and keys, and detaches cleanly', () => {
     const { cam, controls } = rig();
-    const el = Object.assign(new EventTarget(), { tabIndex: -1 });
+    const el = new EventTarget();
     const detach = controls.attach(el);
-    expect(el.tabIndex).toBe(0);
 
     el.dispatchEvent(ev('pointerdown', { pointerId: 1, clientX: 0, clientY: 0 }));
     el.dispatchEvent(ev('pointermove', { pointerId: 1, clientX: 100, clientY: 0 }));
@@ -277,5 +276,120 @@ describe('CosmoControls roll easing (camera up -> orbit axis)', () => {
     const u = cam.getCameraUp();
     expect(u.every(Number.isFinite)).toBe(true);
     expect(u[2]).toBeCloseTo(1, 6);
+  });
+});
+
+describe('CosmoControls v1.1: surfaces, touch and page-level keys', () => {
+  const EARTH_R = 6_371_000;
+
+  function earthRig(distanceM: number) {
+    const cam = new CosmoCamera(new FrameStack());
+    cam.setPose({
+      frame: 'planet',
+      position: [0, -distanceM / 1000, 0],
+      target: { frame: 'planet', position: [0, 0, 0] },
+      up: [0, 0, 1],
+    });
+    const controls = new CosmoControls(cam, { reducedMotion: true });
+    return { cam, controls, dist: () => cam.distanceTo({ frame: 'planet', position: [0, 0, 0] }) };
+  }
+
+  it('setMinDistance stops zoom-in just above the surface', () => {
+    const { controls, dist } = earthRig(3 * EARTH_R);
+    controls.setMinDistance(1.05 * EARTH_R);
+    controls.zoom(-1000);
+    controls.update(1 / 60);
+    expect(dist()).toBeCloseTo(1.05 * EARTH_R, 0);
+  });
+
+  it('without a radius, zoom can pass through the planet (the v1 bug this fixes)', () => {
+    const { controls, dist } = earthRig(3 * EARTH_R);
+    controls.zoom(-1000);
+    controls.update(1 / 60);
+    expect(dist()).toBeLessThan(EARTH_R);
+  });
+
+  it('does not snap a camera that is already inside the limit; it just cannot go further in', () => {
+    const { controls, dist } = earthRig(EARTH_R); // e.g. landed close
+    controls.setMinDistance(1.05 * EARTH_R);
+    controls.rotate(50, 0); // orbiting alone must not jump outward
+    controls.update(1 / 60);
+    expect(dist()).toBeCloseTo(EARTH_R, 0);
+    controls.zoom(-5);
+    controls.update(1 / 60);
+    expect(dist()).toBeCloseTo(EARTH_R, 0);
+    controls.zoom(5); // zooming out still works
+    controls.update(1 / 60);
+    expect(dist()).toBeGreaterThan(1.05 * EARTH_R);
+  });
+
+  it('setMinDistance(0) falls back to the 1 m default', () => {
+    const { controls, dist } = earthRig(10);
+    controls.setMinDistance(1e9);
+    controls.setMinDistance(0);
+    controls.zoom(-1000);
+    controls.update(1 / 60);
+    expect(dist()).toBeCloseTo(1, 6);
+  });
+
+  it('sets touch-action: none on attach and restores it on detach', () => {
+    const { controls } = rig();
+    const el = Object.assign(new EventTarget(), { style: { touchAction: 'auto' } });
+    const detach = controls.attach(el);
+    expect(el.style.touchAction).toBe('none');
+    detach();
+    expect(el.style.touchAction).toBe('auto');
+  });
+
+  function key(k: string, extra: Record<string, unknown> = {}): Event {
+    return Object.assign(new Event('keydown', { cancelable: true }), { key: k, ...extra });
+  }
+
+  it('arrow and +/- keys work at page level without focusing the view', () => {
+    const { cam, controls } = rig();
+    const doc = new EventTarget();
+    const el = Object.assign(new EventTarget(), { ownerDocument: doc });
+    controls.attach(el);
+    const plus = key('+');
+    doc.dispatchEvent(plus);
+    controls.update(1 / 60);
+    expect(plus.defaultPrevented).toBe(true);
+    expect(len(offset(cam))).toBeCloseTo(10 * Math.exp(-0.15), 6);
+    doc.dispatchEvent(key('ArrowRight'));
+    controls.update(1 / 60);
+    expect(Math.abs(offset(cam)[0])).toBeGreaterThan(0.1);
+    el.dispatchEvent(key('-')); // nothing listens on the element itself any more
+    controls.update(1 / 60);
+    expect(len(offset(cam))).toBeCloseTo(10 * Math.exp(-0.15), 6);
+  });
+
+  it('ignores keys while typing in a field, with modifiers, or already handled', () => {
+    const { cam, controls } = rig();
+    const doc = new EventTarget();
+    controls.attach(Object.assign(new EventTarget(), { ownerDocument: doc }));
+    const typed = key('+');
+    Object.defineProperty(typed, 'target', { value: { tagName: 'INPUT' } });
+    doc.dispatchEvent(typed);
+    const editable = key('-');
+    Object.defineProperty(editable, 'target', { value: { tagName: 'DIV', isContentEditable: true } });
+    doc.dispatchEvent(editable);
+    doc.dispatchEvent(key('+', { ctrlKey: true }));
+    doc.dispatchEvent(key('ArrowLeft', { metaKey: true }));
+    const handled = key('+');
+    handled.preventDefault();
+    doc.dispatchEvent(handled);
+    controls.update(1 / 60);
+    expect(len(offset(cam))).toBeCloseTo(10, 9);
+    expect(typed.defaultPrevented).toBe(false);
+  });
+
+  it('detach removes the page-level key listener', () => {
+    const { cam, controls } = rig();
+    const doc = new EventTarget();
+    const detach = controls.attach(Object.assign(new EventTarget(), { ownerDocument: doc }));
+    detach();
+    doc.dispatchEvent(key('+'));
+    controls.update(1 / 60);
+    expect(len(offset(cam))).toBeCloseTo(10, 9);
   });
 });

@@ -22,6 +22,18 @@ export function get(id: string): CatalogEntry | undefined {
   return entries.get(id);
 }
 
+/**
+ * Survey designations for 2MRS cosmic-web galaxies (v1.1): their names are
+ * bare 2MASX coordinates (e.g. '12561432+5652244'), so also match
+ * '2MASX J12561432+5652244' and '2MRS 12561432+5652244'.
+ */
+export function designations(e: CatalogEntry): string[] {
+  if (!e.id.startsWith('cosmicweb:2mrs:')) return [];
+  const bare = e.name.replace(/^2MASX\s*J?/i, '');
+  if (!/^\d{8}[+-]\d{7}$/.test(bare)) return [];
+  return [`2MASX J${bare}`, `2MRS ${bare}`];
+}
+
 /** Prefix-first fuzzy search over names and aliases. */
 export function search(query: string, limit = 8): CatalogEntry[] {
   const q = query.trim().toLowerCase();
@@ -29,7 +41,7 @@ export function search(query: string, limit = 8): CatalogEntry[] {
   const scored: [number, CatalogEntry][] = [];
   for (const e of entries.values()) {
     let best = Infinity;
-    for (const n of [e.name, ...(e.aliases ?? [])]) {
+    for (const n of [e.name, ...(e.aliases ?? []), ...designations(e)]) {
       const s = n.toLowerCase();
       const i = s.indexOf(q);
       if (i === 0) best = Math.min(best, 0);
