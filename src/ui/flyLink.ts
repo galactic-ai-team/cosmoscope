@@ -3,8 +3,11 @@
 // Contract: ids are <kind>:<catalog>:<id> (e.g. galaxy:messier:M31), see docs/CONTRACTS.md.
 
 export type TargetKind = 'planet' | 'star' | 'galaxy';
-/** Id prefixes search can route. 'cluster' = galaxy clusters (Virgo, Coma, Fornax) from Nova's galaxies data. */
-export type PickKind = TargetKind | 'cluster';
+/**
+ * Id prefixes search can route. 'cluster' = galaxy clusters (Virgo, Coma, Fornax) from Nova's galaxies data.
+ * 'cosmicweb' = Gemini's 2MRS cosmic-web galaxies (cosmicweb:2mrs:<n>, #48).
+ */
+export type PickKind = TargetKind | 'cluster' | 'cosmicweb';
 export type Approach = 'orbit' | 'surface' | 'flyby';
 
 /** Structural match for Dee's FlyToController.flyTo (src/core/flyTo.ts). */
@@ -12,7 +15,7 @@ export interface Flyer {
   flyTo(t: { kind: TargetKind; id: string; approach: Approach }, now?: number): { promise: Promise<void>; cancel(): void };
 }
 
-const KINDS: readonly PickKind[] = ['planet', 'star', 'galaxy', 'cluster'];
+const KINDS: readonly PickKind[] = ['planet', 'star', 'galaxy', 'cluster', 'cosmicweb'];
 
 /** Infer the pick kind from an id prefix, or null if the prefix is unknown. */
 export function kindFromId(id: string): PickKind | null {
@@ -25,11 +28,11 @@ export function kindFromId(id: string): PickKind | null {
 /**
  * Map a pick kind to a kind Dee's FlyToTarget accepts. Dee's flyTo resolves
  * targets by id via registry.resolveTarget, so kind is informational only;
- * a galaxy cluster flies like a galaxy (same extragalactic scale/frames).
+ * a galaxy cluster or a 2MRS cosmic-web galaxy flies like a galaxy (same extragalactic scale/frames).
  * TODO(Dee): if FlyToTarget.kind gains 'cluster', drop this mapping.
  */
 export function flightKind(k: PickKind): TargetKind {
-  return k === 'cluster' ? 'galaxy' : k;
+  return k === 'cluster' || k === 'cosmicweb' ? 'galaxy' : k;
 }
 
 /**
