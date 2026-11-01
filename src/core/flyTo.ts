@@ -84,11 +84,9 @@ export class FlyToController {
     if (!s) return;
     s.cancelled = true;
     this.state = null;
-    if (typeof this.api.distanceTo === 'function') { // minimal test fakes skip it
-      const current = this.api.getFrameId();
-      const want = chooseFrame(current, this.api.distanceTo(SUN_AT), s.targetFrame);
-      if (want !== current) this.api.rebaseTo(want);
-    }
+    const current = this.api.getFrameId();
+    const want = chooseFrame(current, this.api.distanceTo(SUN_AT), s.targetFrame);
+    if (want !== current) this.api.rebaseTo(want);
     s.resolve();
   }
 
