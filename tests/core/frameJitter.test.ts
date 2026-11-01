@@ -61,6 +61,13 @@ function makeFakeApiWithFrameSwitch(
       this.cameraPos[1] = pos[1];
       this.cameraPos[2] = pos[2];
     },
+    // Lumi (mechanical): main's FlyToController.update() calls
+    // setCameraWorldPosition (camera keeps its own frame); same no-conversion fake.
+    setCameraWorldPosition(pos: Float64Array, _frame?: FrameId): void {
+      this.cameraPos[0] = pos[0];
+      this.cameraPos[1] = pos[1];
+      this.cameraPos[2] = pos[2];
+    },
     rebaseTo(frame: FrameId): void {
       // Same origin for helio and galactic in this fake, so no position change.
       this.frame = frame;
