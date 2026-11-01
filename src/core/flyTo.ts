@@ -14,13 +14,19 @@
 // Controls integration: CosmoControls should check `flyer.flying` at the top
 // of its input handler and stand down while true. `flyer.cancelFlight()` is a
 // controller-level cancel (no handle needed) for ESC-key / user-interrupt.
+//
+// Mid-flight frame choice (Claude's #44): update() picks the render frame by
+// distance from the Sun, matching the idle loop's hysteresis. Path math stays
+// in the target's frame; rebaseTo() is exact. Look-at position is converted
+// into the post-rebase render frame before orienting, so the camera doesn't
+// snap sideways at the 120 AU handoff.
 
 import type { FrameApi, FramedPoint } from './camera';
 import { chooseFrame } from './frameSwitch';
 import type { FrameId } from './frames';
 import type { LayerRegistry } from './layers';
 
-/** The Sun, as the helio origin (Lumi: frame choice mid-flight). */
+/** The Sun, as the helio origin. Used for distance-based frame choice. */
 const SUN_AT: FramedPoint = { frame: 'helio', position: new Float64Array([0, 0, 0]) };
 
 export type TargetKind = 'planet' | 'star' | 'galaxy' | 'cluster';
@@ -60,6 +66,9 @@ interface FlightState {
   resolve: () => void;
 }
 
+// Reused scratch for lookAt conversion. Allocated once at module scope.
+const lookAtScratch = new Float64Array(3);
+
 export class FlyToController {
   private state: FlightState | null = null;
 
@@ -73,21 +82,13 @@ export class FlyToController {
     return this.state !== null && !this.state.cancelled;
   }
 
-  /**
-   * Cancel the current flight, if any. No handle needed.
-   * Lumi (Dee's suggestion): run one chooseFrame pass so a flight cancelled
-   * far from the Sun leaves the camera in the right frame
-   * (helio/galactic/cosmic), same rules as update().
-   */
+  /** Cancel the current flight, if any. No handle needed. */
   cancelFlight(): void {
-    const s = this.state;
-    if (!s) return;
-    s.cancelled = true;
-    this.state = null;
-    const current = this.api.getFrameId();
-    const want = chooseFrame(current, this.api.distanceTo(SUN_AT), s.targetFrame);
-    if (want !== current) this.api.rebaseTo(want);
-    s.resolve();
+    if (this.state) {
+      this.state.cancelled = true;
+      this.state.resolve();
+      this.state = null;
+    }
   }
 
   flyTo(target: FlyToTarget, now = performance.now() / 1000): FlyToHandle {
@@ -99,7 +100,6 @@ export class FlyToController {
       };
     }
 
-    // Cancel any in-progress flight.
     this.cancelFlight();
 
     const targetFrame = resolved.frameId;
@@ -180,21 +180,35 @@ export class FlyToController {
     outPos[1] = s.targetPos[1] + s.startDir[1] * curDistFromTarget;
     outPos[2] = s.targetPos[2] + s.startDir[2] * curDistFromTarget;
 
-    // Lumi (Claude's #44 follow-up): pick the camera's frame by distance from
-    // the Sun mid-flight too, with the same hysteresis as the idle loop, so a
-    // flight from deep space to a planet keeps the star field until it's
-    // inside 80 AU, and a flight out from a planet switches to 'galactic' at
-    // 120 AU. Same for galactic <-> cosmic (leave past 0.5 Mpc, back inside
-    // 0.3 Mpc for galactic-or-nearer targets; Nova's handoff). Path math stays
-    // in the target's frame; the result is stored in the camera's CURRENT
-    // frame (no frame change), and the camera rebases only when chooseFrame
-    // says so (Claude's #47 review: no double flip per frame). rebaseTo() is exact.
-    this.api.setCameraWorldPosition(outPos, s.targetFrame);
-    const want = chooseFrame(this.api.getFrameId(), this.api.distanceTo(SUN_AT), s.targetFrame);
-    if (want !== this.api.getFrameId()) this.api.rebaseTo(want);
-    // lookAt's second arg is the frame targetPos is expressed in; the camera
-    // stores the target with its frame and converts when rendering.
-    this.api.lookAt(s.targetPos, s.targetFrame);
+    // Path math stays in the target's frame.
+    this.api.setCameraFrameAndPosition(s.targetFrame, outPos);
+
+    // Pick the render frame by distance from the Sun, with hysteresis. Runs
+    // after the flight's own position set so chooseFrame sees the post-update
+    // frame and position.
+    if (typeof this.api.distanceTo === 'function') {
+      const currentFrame = this.api.getFrameId();
+      const want = chooseFrame(
+        currentFrame,
+        this.api.distanceTo(SUN_AT),
+        s.targetFrame,
+      );
+      if (want !== currentFrame) this.api.rebaseTo(want);
+    }
+
+    // Convert the target's position from its flight frame into the current
+    // render frame before lookAt, so the camera orients toward the same
+    // physical point regardless of which frame the render loop is drawing in.
+    // Without this, a rebase from galactic -> helio mid-flight makes lookAt
+    // aim at the target's galactic-frame coordinates as if they were helio —
+    // the camera snaps sideways at the 120 AU handoff.
+    const renderFrame = this.api.getFrameId();
+    if (renderFrame === s.targetFrame) {
+      this.api.lookAt(s.targetPos, renderFrame);
+    } else {
+      this.api.toFrame(s.targetPos, s.targetFrame, renderFrame, lookAtScratch);
+      this.api.lookAt(lookAtScratch, renderFrame);
+    }
 
     if (rawT >= 1) {
       s.resolve();
