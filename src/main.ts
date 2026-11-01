@@ -29,6 +29,8 @@ import { mountHomeKey } from './ui/home';
 import { orbitUpFor } from './ui/orbitUp';
 import { chooseFrame } from './core/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
+import { MAX_VIEW_DISTANCE_M } from './ui/viewLimits';
+import { createStarGlow } from './ui/starGlow';
 
 const MAX_DT = 0.1;
 const HYG_URL = '/data/hyg-v41.json';
@@ -106,6 +108,8 @@ const flight = new FlyToController(camera, registry);
 let now = performance.now() / 1000; // loop clock, seconds
 
 let currentFlight: FlyToHandle | null = null;
+// v1.1 (Lumi): star targets get a visible disc + glow (the point field has no Sun and fixed-size points).
+const starGlow = createStarGlow(scene, camera);
 /** Point the camera at the target as the flight starts (flyTo moves position only). */
 const flyer: Flyer = {
   flyTo(t: FlyToTarget, at?: number) {
@@ -119,6 +123,7 @@ const flyer: Flyer = {
       // Solar-system arrivals orbit around ecliptic north (Claude's idea, Lumi).
       controls.setUp(orbitUpFor(r.frameId));
     }
+    starGlow.setFocus(r && t.id.startsWith('star:') ? { frame: r.frameId, position: r.worldPos } : null);
     currentFlight = flight.flyTo(t, at ?? now);
     return currentFlight;
   },
@@ -135,10 +140,16 @@ const tour = createTour({
     return flyer.flyTo({ kind: flightKind(k), id, approach: 'orbit' }, now).promise;
   },
   onStop(id) { recordPick(id); showInfoById(id); },
+  cancel() {
+    // Stop Tour mid-leg: cancel the pending flight so it can't land on the next stop.
+    currentFlight?.cancel();
+    flight.cancelFlight();
+    currentFlight = null;
+  },
   onEnd() { tourBtn?.setAttribute('aria-pressed', 'false'); if (tourBtn) tourBtn.textContent = 'Grand Tour'; },
 });
 tourBtn?.addEventListener('click', () => {
-  if (tour.running) { tour.stop(); return; }
+  if (tour.running) { tour.stop({ returnToStop: true }); return; }
   tourBtn.setAttribute('aria-pressed', 'true');
   tourBtn.textContent = 'Stop tour';
   tour.start();
@@ -150,7 +161,8 @@ mountHomeKey(pickTarget);
 
 // ---- navigation: Claude's CosmoControls (drag orbit, wheel/pinch log zoom, keys) ----
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const controls = new CosmoControls(camera, { reducedMotion });
+// v1.1 (Lumi): zoom-out capped at ~2x the 2MRS web extent via the existing maxDistance option (no controls.ts change).
+const controls = new CosmoControls(camera, { reducedMotion, maxDistance: MAX_VIEW_DISTANCE_M });
 controls.attach(renderer.domElement);
 // Grabbing the view cancels a running flight and the Grand Tour.
 // Claude's CosmoControls calls onUserInput even while disabled (PR #18), so no
@@ -191,6 +203,7 @@ renderer.setAnimationLoop((ms: number) => {
     if (want !== camera.getFrameId()) camera.rebaseTo(want); // orbit axis stays the target's
   }
   camera.update();      // Claude: sync the three.js puppet before layers read it
+  starGlow.update();    // Lumi: focus-star disc (camera-relative, after the puppet sync)
   registry.update(dt);  // Dee: crossfades + per-layer update (camera-relative positions)
 
   if (scaleEl) {
