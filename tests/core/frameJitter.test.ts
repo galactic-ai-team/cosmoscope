@@ -57,6 +57,13 @@ function makeFakeApiWithFrameSwitch(
       out[2] = this.cameraPos[2];
       return out;
     },
+    // Lumi (mechanical): FlyToController.update() now calls
+    // setCameraWorldPosition (FrameApi); same no-conversion fake as the others.
+    setCameraWorldPosition(pos: Float64Array, _frame?: FrameId): void {
+      this.cameraPos[0] = pos[0];
+      this.cameraPos[1] = pos[1];
+      this.cameraPos[2] = pos[2];
+    },
     setCameraFrameAndPosition(frame: FrameId, pos: Float64Array): void {
       this.frame = frame;
       this.cameraPos[0] = pos[0];
