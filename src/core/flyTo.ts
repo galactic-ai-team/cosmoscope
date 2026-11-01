@@ -176,10 +176,11 @@ export class FlyToController {
     // the Sun mid-flight too, with the same hysteresis as the idle loop, so a
     // flight from deep space to a planet keeps the star field until it's
     // inside 80 AU, and a flight out from a planet switches to 'galactic' at
-    // 120 AU. Path math stays in the target's frame; the result is stored in
-    // the camera's CURRENT frame (no frame change), and the camera rebases
-    // only when chooseFrame says so (Claude's #47 review: no double flip per
-    // frame). rebaseTo() is exact.
+    // 120 AU. Same for galactic <-> cosmic (leave past 0.5 Mpc, back inside
+    // 0.3 Mpc for galactic-or-nearer targets; Nova's handoff). Path math stays
+    // in the target's frame; the result is stored in the camera's CURRENT
+    // frame (no frame change), and the camera rebases only when chooseFrame
+    // says so (Claude's #47 review: no double flip per frame). rebaseTo() is exact.
     this.api.setCameraWorldPosition(outPos, s.targetFrame);
     const want = chooseFrame(this.api.getFrameId(), this.api.distanceTo(SUN_AT), s.targetFrame);
     if (want !== this.api.getFrameId()) this.api.rebaseTo(want);
