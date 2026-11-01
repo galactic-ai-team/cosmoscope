@@ -21,7 +21,7 @@ import type { FrameId } from './frames';
 import type { LayerRegistry } from './layers';
 
 /** The Sun, as the helio origin (Lumi: frame choice mid-flight). */
-const SUN_AT: FramedPoint = { frame: 'helio', position: [0, 0, 0] };
+const SUN_AT: FramedPoint = { frame: 'helio', position: new Float64Array([0, 0, 0]) };
 
 export type TargetKind = 'planet' | 'star' | 'galaxy' | 'cluster';
 export type Approach = 'orbit' | 'surface' | 'flyby';
@@ -176,13 +176,15 @@ export class FlyToController {
     // the Sun mid-flight too, with the same hysteresis as the idle loop, so a
     // flight from deep space to a planet keeps the star field until it's
     // inside 80 AU, and a flight out from a planet switches to 'galactic' at
-    // 120 AU. Path math stays in the target's frame; rebaseTo() is exact.
-    const prevFrame = this.api.getFrameId();
-    this.api.setCameraFrameAndPosition(s.targetFrame, outPos);
-    if (typeof this.api.distanceTo === 'function') { // minimal test fakes skip it
-      const want = chooseFrame(prevFrame, this.api.distanceTo(SUN_AT), s.targetFrame);
-      if (want !== s.targetFrame) this.api.rebaseTo(want);
-    }
+    // 120 AU. Path math stays in the target's frame; the result is stored in
+    // the camera's CURRENT frame (no frame change), and the camera rebases
+    // only when chooseFrame says so (Claude's #47 review: no double flip per
+    // frame). rebaseTo() is exact.
+    this.api.setCameraWorldPosition(outPos, s.targetFrame);
+    const want = chooseFrame(this.api.getFrameId(), this.api.distanceTo(SUN_AT), s.targetFrame);
+    if (want !== this.api.getFrameId()) this.api.rebaseTo(want);
+    // lookAt's second arg is the frame targetPos is expressed in; the camera
+    // stores the target with its frame and converts when rendering.
     this.api.lookAt(s.targetPos, s.targetFrame);
 
     if (rawT >= 1) {
