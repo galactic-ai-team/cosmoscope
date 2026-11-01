@@ -25,6 +25,12 @@ export function showInfo(e: CatalogEntry): void {
   box.hidden = false;
 }
 
+export const NO_RESULTS = 'No results';
+/** v1.1: show the non-clickable 'No results' row for a typed, focused query with no matches. */
+export function showNoResults(query: string, resultCount: number, focused: boolean): boolean {
+  return focused && resultCount === 0 && query.trim() !== '';
+}
+
 /** showInfoOnPick=false lets the flight bridge open the panel on arrival instead. */
 export function mountSearch(onPick: (id: string) => void, showInfoOnPick = true): void {
   const input = document.querySelector<HTMLInputElement>('#search input')!;
@@ -35,6 +41,18 @@ export function mountSearch(onPick: (id: string) => void, showInfoOnPick = true)
   let sel = 0;
 
   const render = () => {
+    // v1.1: a typed query with no matches shows a non-clickable 'No results' row.
+    if (showNoResults(input.value, results.length, document.activeElement === input)) {
+      const li = document.createElement('li');
+      li.className = 'no-results';
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-disabled', 'true');
+      li.textContent = NO_RESULTS;
+      li.addEventListener('mousedown', (ev) => ev.preventDefault()); // keep focus, pick nothing
+      list.replaceChildren(li);
+      list.hidden = false;
+      return;
+    }
     list.replaceChildren(...results.map((r, i) => {
       const li = document.createElement('li');
       li.setAttribute('role', 'option');
@@ -48,17 +66,18 @@ export function mountSearch(onPick: (id: string) => void, showInfoOnPick = true)
   const pick = (i: number) => {
     const r = results[i];
     if (!r) return;
-    input.value = r.name; results = []; render(); input.blur();
+    input.value = r.name; results = []; input.blur(); render();
     if (showInfoOnPick) { const e = get(r.id); if (e) showInfo(e); }
     onPick(r.id);
   };
   input.addEventListener('input', () => { results = search(input.value); sel = 0; render(); });
   input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'ArrowDown') { sel = Math.min(sel + 1, results.length - 1); render(); ev.preventDefault(); }
+    if (ev.key === 'ArrowDown') { sel = Math.max(0, Math.min(sel + 1, results.length - 1)); render(); ev.preventDefault(); }
     else if (ev.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(); ev.preventDefault(); }
     else if (ev.key === 'Enter') pick(sel);
-    else if (ev.key === 'Escape') { results = []; render(); input.blur(); }
+    else if (ev.key === 'Escape') { results = []; input.blur(); render(); }
   });
+  input.addEventListener('blur', () => { if (results.length === 0) list.hidden = true; });
   window.addEventListener('keydown', (ev) => {
     if (ev.key === '/' && document.activeElement !== input) { ev.preventDefault(); input.focus(); }
   });
