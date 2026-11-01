@@ -75,6 +75,7 @@ export class SolarSystemLayer implements ScaleLayer {
     pivot: THREE.Group; 
     data: PlanetData;
     approachRadius: number;
+    radius: number; // rendered sphere radius, AU (v1.1, Lumi)
     worldPos: THREE.Vector3;
     material: THREE.MeshStandardMaterial;
     orbitLine: THREE.Line;
@@ -202,6 +203,7 @@ export class SolarSystemLayer implements ScaleLayer {
         pivot: pivot,
         data,
         approachRadius: auRadius * 3.0,
+        radius: auRadius,
         worldPos: new THREE.Vector3(auDist, 0, 0),
         material: planetMat,
         orbitLine: orbitLine,
@@ -296,7 +298,8 @@ export class SolarSystemLayer implements ScaleLayer {
       return {
         frameId: 'helio' as FrameId,
         worldPos,
-        approachRadius: found.approachRadius
+        approachRadius: found.approachRadius,
+        radius: found.radius
       };
     }
 

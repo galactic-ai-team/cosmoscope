@@ -24,6 +24,8 @@ export interface ResolvedTarget {
   worldPos: Float64Array;
   /** Suggested approach distance in frame units (e.g. 3× body radius). */
   approachRadius: number;
+  /** Optional body (surface) radius in frame units, for bodies with a surface; used for the zoom-in floor (v1.1, Lumi). */
+  radius?: number;
 }
 
 export interface ScaleLayer {
