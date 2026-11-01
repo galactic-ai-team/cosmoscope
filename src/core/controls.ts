@@ -16,6 +16,14 @@
 //     or a setUp() call), the camera's up eases onto the axis over ~0.3 s,
 //     even with no input; reducedMotion snaps it. A drag during the ease
 //     continues from the partly eased up rather than snapping first.
+//   - Surfaces: setMinDistance(m) stops zoom-in at m metres from the target's
+//     centre (main.ts sets ~1.05x the body's radius when a flight starts), so
+//     you can't scroll through a planet. A camera already inside that limit
+//     isn't snapped out; it just can't zoom further in.
+//   - Touch: attach() sets touch-action: none on the element, so the browser
+//     doesn't turn pinch/drag into page zoom or scrolling.
+//   - Keys: arrows and +/- work anywhere on the page (document-level), except
+//     while typing in a field or with Ctrl/Cmd/Alt held.
 //   - No target, no orbit: controls do nothing until something is targeted.
 //
 // main.ts wiring:
@@ -43,7 +51,7 @@ export interface ControlsOptions {
   rotateSpeed?: number;
   /** Natural-log zoom per wheel notch (0.15 is ~16% per notch). */
   zoomStep?: number;
-  /** Closest approach to the target, meters. */
+  /** Closest approach to the target's centre, meters (default 1). See setMinDistance(). */
   minDistance?: number;
   /** Farthest distance from the target, meters. */
   maxDistance?: number;
@@ -55,13 +63,19 @@ export interface ControlsOptions {
   reducedMotion?: boolean;
 }
 
-/** The slice of an element attach() needs (HTMLElement satisfies it). */
-export interface ControlsElement {
+/** Minimal event-target shape (Document and HTMLElement both satisfy it). */
+export interface ControlsEventTarget {
   addEventListener(type: string, listener: (e: any) => void, options?: AddEventListenerOptions | boolean): void;
   removeEventListener(type: string, listener: (e: any) => void, options?: EventListenerOptions | boolean): void;
+}
+
+/** The slice of an element attach() needs (HTMLElement satisfies it). */
+export interface ControlsElement extends ControlsEventTarget {
   setPointerCapture?(id: number): void;
   releasePointerCapture?(id: number): void;
-  tabIndex?: number;
+  /** Keys are bound here (document-level) when present; otherwise on the element. */
+  ownerDocument?: ControlsEventTarget | null;
+  style?: { touchAction: string };
 }
 
 const POLE_MARGIN = 1e-3; // radians kept clear of each pole
@@ -75,7 +89,7 @@ export class CosmoControls {
   private readonly up = new Float64Array([0, 0, 1]);
   private readonly rotateSpeed: number;
   private readonly zoomStep: number;
-  private readonly minDistance: number;
+  private minDistance: number;
   private readonly maxDistance: number;
   private readonly damping: number;
   private readonly upEase: number;
@@ -106,6 +120,15 @@ export class CosmoControls {
     this.maxDistance = opts.maxDistance ?? 1e27;
     this.damping = opts.reducedMotion ? 0 : (opts.damping ?? 0.08);
     this.upEase = opts.reducedMotion ? 0 : (opts.upEase ?? 0.1);
+  }
+
+  /**
+   * Closest approach to the target's centre, in metres. Set it to ~1.05x a
+   * body's radius so zoom stops just above the surface; pass 0 or a
+   * non-finite value to go back to the 1 m default.
+   */
+  setMinDistance(metres: number): void {
+    this.minDistance = Number.isFinite(metres) && metres > 0 ? metres : 1;
   }
 
   setUp(up: ArrayLike<number>): void {
@@ -242,7 +265,10 @@ export class CosmoControls {
     // Zoom: scale the offset in log space, clamped in meters.
     const unit = this.camera.unitsPerFrame(frame);
     const meters = dist * unit;
-    const nextMeters = clamp(meters * Math.exp(logZoom), this.minDistance, this.maxDistance);
+    // If the camera is already inside minDistance (e.g. it landed close), don't
+    // snap it out; just don't let it go any further in.
+    const lower = Math.min(this.minDistance, meters);
+    const nextMeters = clamp(meters * Math.exp(logZoom), lower, this.maxDistance);
     const s = nextMeters / meters;
     // rodrigues preserves length, so dist is still |o|.
     this.cam[0] = this.tgt[0] + o[0] * s;
@@ -337,6 +363,7 @@ export class CosmoControls {
       this.zoom(e.deltaY * scale);
     };
     const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
       let handled = true;
       switch (e.key) {
         case 'ArrowLeft':
@@ -372,8 +399,10 @@ export class CosmoControls {
     el.addEventListener('pointerup', onUp);
     el.addEventListener('pointercancel', onUp);
     el.addEventListener('wheel', onWheel, { passive: false });
-    el.addEventListener('keydown', onKey);
-    if (typeof el.tabIndex === 'number' && el.tabIndex < 0) el.tabIndex = 0; // focusable for keys
+    const keyTarget: ControlsEventTarget = el.ownerDocument ?? el;
+    keyTarget.addEventListener('keydown', onKey);
+    const prevTouchAction = el.style?.touchAction ?? '';
+    if (el.style) el.style.touchAction = 'none'; // pinch/drag are ours, not page zoom/scroll
 
     const detach = (): void => {
       el.removeEventListener('pointerdown', onDown);
@@ -381,7 +410,8 @@ export class CosmoControls {
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onUp);
       el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('keydown', onKey);
+      keyTarget.removeEventListener('keydown', onKey);
+      if (el.style) el.style.touchAction = prevTouchAction;
       pointers.clear();
       if (this.detach === detach) this.detach = null;
     };
@@ -398,6 +428,14 @@ export class CosmoControls {
   private touched(): void {
     for (const l of this.inputListeners) l();
   }
+}
+
+/** True when a key event comes from a text field or editable element. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as { tagName?: string; isContentEditable?: boolean } | null;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  return typeof el.tagName === 'string' && /^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName);
 }
 
 /** Rotate v in place about unit axis k by angle a (Rodrigues' formula). */
