@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { METERS } from '../core/frames';
-import type { GalaxyGeneratorParams } from './galaxyProfiles';
+import type { GalaxyGeneratorParams } from '../layers/galaxyProfiles';
 
 export interface GeneratedGalaxy {
   container: THREE.Group;
