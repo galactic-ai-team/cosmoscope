@@ -1,4 +1,4 @@
-// src/core/__tests__/flyControls.test.ts � free-fly mode (owner: Claude).
+// src/core/__tests__/flyControls.test.ts — free-fly mode (owner: Claude).
 import { describe, expect, it, vi } from 'vitest';
 
 import { CosmoCamera } from '../camera';

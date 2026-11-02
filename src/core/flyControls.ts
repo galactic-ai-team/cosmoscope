@@ -1,4 +1,4 @@
-// src/core/flyControls.ts � free-fly mode (owner: Claude).
+// src/core/flyControls.ts — free-fly mode (owner: Claude).
 //
 // Spaceship-style flight through the whole universe, not tied to orbiting a
 // target. Works on top of FrameApi exactly like CosmoControls does: the real

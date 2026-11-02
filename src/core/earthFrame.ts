@@ -1,4 +1,4 @@
-// src/core/earthFrame.ts � Cosmoscope sky axes <-> Earth lat/lon (owner: Claude).
+// src/core/earthFrame.ts — Cosmoscope sky axes <-> Earth lat/lon (owner: Claude).
 //
 // Cosmoscope's frames all use ICRS axes (fixed to the distant sky). Earth
 // spins under them, and its axis also drifts slowly (precession, ~50"/year),

@@ -1,4 +1,4 @@
-// src/core/__tests__/earthFrame.test.ts � ICRS <-> Earth lat/lon (owner: Claude).
+// src/core/__tests__/earthFrame.test.ts — ICRS <-> Earth lat/lon (owner: Claude).
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,7 +17,7 @@ const Y2025 = new Date(Date.UTC(2025, 0, 1, 12, 0, 0));
 const deg = (r: number) => (r * 180) / Math.PI;
 
 describe('gmst', () => {
-  it('is 18.697374558 h (280.4606�) at J2000.0', () => {
+  it('is 18.697374558 h (280.4606°) at J2000.0', () => {
     expect(deg(gmst(J2000))).toBeCloseTo(280.46061837, 5);
   });
 
@@ -29,13 +29,13 @@ describe('gmst', () => {
 });
 
 describe('precession', () => {
-  it('moves the J2000 equinox ~0.32� east in right ascension by 2025', () => {
+  it('moves the J2000 equinox ~0.32° east in right ascension by 2025', () => {
     const p = precessionMatrix(Y2025);
     const [x, y] = [p[0], p[3]]; // image of the ICRS x axis
     expect(deg(Math.atan2(y, x))).toBeCloseTo(0.32, 2);
   });
 
-  it('tilts the J2000 pole by ~0.139� by 2025', () => {
+  it('tilts the J2000 pole by ~0.139° by 2025', () => {
     const p = precessionMatrix(Y2025);
     const zz = p[8];
     expect(deg(Math.acos(zz))).toBeCloseTo(0.139, 3);
@@ -74,7 +74,7 @@ describe('geodetic conversions', () => {
 });
 
 describe('icrsToLatLon', () => {
-  it('at J2000.0 the ICRS x axis (vernal equinox) is over longitude 360 - 280.46 = 79.54� E', () => {
+  it('at J2000.0 the ICRS x axis (vernal equinox) is over longitude 360 - 280.46 = 79.54° E', () => {
     const g = icrsToLatLon([WGS84_A + 1000, 0, 0], J2000);
     expect(g.lat).toBeCloseTo(0, 6);
     expect(g.lon).toBeCloseTo(79.5393816, 4);
