@@ -17,6 +17,7 @@ import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { createCosmicWebLayer } from './layers/cosmicWebLayer';
+import { createProceduralGalaxiesLayer } from './ui/proceduralGalaxies';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
@@ -89,7 +90,10 @@ function adaptStub(stub: StubLayer, extraFrames: FrameId[] = []): ScaleLayer {
 }
 
 // Nova's galaxies layer implements ScaleLayer directly (createGalaxiesLayer + clustersRoute).
-registry.register(createGalaxiesLayer(scene, camera));
+const galaxiesLayer = createGalaxiesLayer(scene, camera);
+registry.register(galaxiesLayer);
+// Lumi glue: Gemini's procedural galaxies for Nova's profiled galaxies.
+registry.register(createProceduralGalaxiesLayer(scene, camera, (id) => galaxiesLayer.resolveTarget(id)));
 registry.register(clustersRoute);
 registry.register(new SolarSystemLayer(scene, camera));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
