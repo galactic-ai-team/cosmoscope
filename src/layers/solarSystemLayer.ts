@@ -79,7 +79,7 @@ export class SolarSystemLayer implements ScaleLayer {
     worldPos: THREE.Vector3;
     material: THREE.MeshStandardMaterial;
     orbitLine: THREE.Line;
-    moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number; material: THREE.MeshStandardMaterial }[] 
+    moons?: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number; material: THREE.MeshStandardMaterial; id: string; distance: number; radius: number }[] 
   }[] = [];
   private sunMesh!: THREE.Mesh;
   private sunMaterial!: THREE.MeshBasicMaterial;
@@ -165,7 +165,7 @@ export class SolarSystemLayer implements ScaleLayer {
       const orbitLine = new THREE.Line(orbitGeo, orbitMat);
       this.container.add(orbitLine);
 
-      let moonEntries: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number; material: THREE.MeshStandardMaterial }[] = [];
+      let moonEntries: { mesh: THREE.Mesh; pivot: THREE.Group; speed: number; material: THREE.MeshStandardMaterial; id: string; distance: number; radius: number }[] = [];
       if (data.moons) {
         data.moons.forEach((moonData) => {
           const moonPivot = new THREE.Group();
@@ -194,7 +194,15 @@ export class SolarSystemLayer implements ScaleLayer {
             blurb: `Natural satellite of ${data.name}.`
           });
 
-          moonEntries.push({ mesh: moonMesh, pivot: moonPivot, speed: moonData.speed, material: moonMat });
+          moonEntries.push({
+            mesh: moonMesh,
+            pivot: moonPivot,
+            speed: moonData.speed,
+            material: moonMat,
+            id: moonData.id,
+            distance: moonAuDist, // AU from the planet's centre
+            radius: moonAuRadius, // rendered sphere radius, AU
+          });
         });
       }
 
@@ -300,6 +308,29 @@ export class SolarSystemLayer implements ScaleLayer {
         worldPos,
         approachRadius: found.approachRadius,
         radius: found.radius
+      };
+    }
+
+    // Moons (Claude): a moon hangs off a pivot that is a child of its planet's
+    // mesh, so its angle is the planet's spin plus the pivot's own rotation,
+    // both about the layer's y axis. Same placement the renderer uses, so a
+    // fly-to, the readout and free-fly's no-fly-into all see the moon where
+    // it's drawn.
+    for (const p of this.planetMeshes) {
+      const moon = p.moons?.find((m) => m.id === id);
+      if (!moon) continue;
+      const theta = p.mesh.rotation.y + moon.pivot.rotation.y;
+      // Three.js rotation about +y takes (d, 0, 0) to (d cos θ, 0, -d sin θ).
+      const worldPos = new Float64Array([
+        p.worldPos.x + Math.cos(theta) * moon.distance,
+        p.worldPos.y,
+        p.worldPos.z - Math.sin(theta) * moon.distance,
+      ]);
+      return {
+        frameId: 'helio' as FrameId,
+        worldPos,
+        approachRadius: moon.radius * 3.0,
+        radius: moon.radius,
       };
     }
 

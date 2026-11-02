@@ -11,7 +11,8 @@ export type PickKind =
   | TargetKind
   | 'cluster'
   | 'cosmicweb'
-  | 'exo';
+  | 'exo'
+  | 'moon';
 
 export type Approach = 'orbit' | 'surface' | 'flyby';
 
@@ -36,6 +37,7 @@ const KINDS: readonly PickKind[] = [
   'cluster',
   'cosmicweb',
   'exo',
+  'moon',
 ];
 
 export function kindFromId(id: string): PickKind | null {
@@ -54,6 +56,10 @@ export function flightKind(kind: PickKind): TargetKind {
 
   if (kind === 'exo') {
     return 'star';
+  }
+
+  if (kind === 'moon') {
+    return 'planet'; // moons resolve through SolarSystemLayer like planets
   }
 
   return kind;

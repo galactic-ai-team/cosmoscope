@@ -21,6 +21,9 @@ export const FLY_BODY_IDS: readonly string[] = [
   'star:sol:sun',
   'planet:mercury', 'planet:venus', 'planet:earth', 'planet:mars',
   'planet:jupiter', 'planet:saturn', 'planet:uranus', 'planet:neptune',
+  // Moons (resolvable since SolarSystemLayer registers them). The Moon's
+  // enlarged sphere sits right on the free-fly path into Earth.
+  'moon:earth-moon', 'moon:phobos', 'moon:deimos',
 ];
 
 export interface BodyCandidate {
