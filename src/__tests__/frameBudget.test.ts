@@ -1,4 +1,4 @@
-// src/__tests__/frameBudget.test.ts (full replacement)
+// src/__tests__/frameBudget.test.ts
 // Tests for FrameBudget. Semantics: trailing-window over-budget count, not
 // consecutive streak; alarm requires a full window (warm-up) and fires at
 // most once per cooldown period.
@@ -19,22 +19,31 @@ describe('FrameBudget — trailing window semantics', () => {
       onOverBudget: (f) => alarms.push(f),
     });
 
-    // Fill the window with 6 slow + 4 fast = 60%, not over threshold.
+    // Fill the window with 6 slow + 4 fast = 60%. Exactly at threshold
+    // (not over) — no alarm.
     fb.tick(30); fb.tick(30); fb.tick(30);
     fb.tick(30); fb.tick(30); fb.tick(30);
     fb.tick(5);  fb.tick(5);  fb.tick(5);  fb.tick(5);
 
     expect(fb.trackedFrames).toBe(10);
     expect(fb.overFraction).toBeCloseTo(0.6, 5);
-    expect(alarms.length).toBe(0); // exactly at threshold, not over
+    expect(alarms.length).toBe(0);
 
-    // Now tick 4 more slow frames — they evict the 4 oldest (3 slow + 1 fast).
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
-    fb.tick(30); // evict fast, add slow: 7 slow, 3 fast = 70% > 60% → alarm
+    // Ring layout after fill (head at index 0, oldest first):
+    //   [slow, slow, slow, slow, slow, slow, fast, fast, fast, fast]
+    // Each tick(30) evicts the oldest slot and inserts a slow at the tail.
+    // Ticks 1-4 evict four of the slow frames → still 6 slow, 4 fast.
+    // Tick 5 evicts a fast frame → 7 slow, 3 fast = 0.7 > 0.6 → alarm.
+    fb.tick(30); // evict slow → 6 slow, 4 fast
+    fb.tick(30); // evict slow → 6 slow, 4 fast
+    fb.tick(30); // evict slow → 6 slow, 4 fast
+    fb.tick(30); // evict slow → 6 slow, 4 fast
+    expect(alarms.length).toBe(0);
+    expect(fb.overFraction).toBeCloseTo(0.6, 5);
+
+    fb.tick(30); // evict fast → 7 slow, 3 fast = 70% → alarm
     expect(alarms.length).toBe(1);
-    expect(alarms[0]).toBeGreaterThan(0.6);
+    expect(alarms[0]).toBeCloseTo(0.7, 5);
   });
 
   it('does NOT reset the count when a fast frame breaks a streak', () => {
@@ -82,15 +91,13 @@ describe('FrameBudget — trailing window semantics', () => {
       onOverBudget,
     });
 
-    // Fill window with 4 slow. Warm at ringCount=4 (full window). Alarm fires
-    // on the 4th tick.
+    // Warm-up requires full window (4 frames). Alarm fires on tick 4.
     fb.tick(30); fb.tick(30); fb.tick(30);
     expect(onOverBudget).not.toHaveBeenCalled();
     fb.tick(30);
     expect(onOverBudget).toHaveBeenCalledTimes(1);
 
-    // 4 more slow ticks. Cooldown 5 means next alarm at framesSinceAlarm >= 5,
-    // i.e. the 5th tick after the last alarm (tick 9 overall).
+    // Cooldown 5: next alarm at framesSinceAlarm >= 5, i.e. 5 ticks later.
     fb.tick(30); // 1
     fb.tick(30); // 2
     fb.tick(30); // 3
