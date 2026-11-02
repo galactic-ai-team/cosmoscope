@@ -31,6 +31,8 @@ import { chooseFrame } from './core/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 import { MAX_VIEW_DISTANCE_M } from './ui/viewLimits';
 import { createStarGlow } from './ui/starGlow';
+import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
+import { mountWalkOnEarth, type EarthSample } from './ui/walkOnEarth';
 
 const MAX_DT = 0.1;
 const HYG_URL = '/data/hyg-v41.json';
@@ -178,6 +180,31 @@ controls.onUserInput(() => {
   currentFlight = null;
 });
 
+// ---- Earth handoff (Lumi): near Earth, "Walk on Earth" fades into earth-walker ----
+// Distances are in Earth's rendered radius; geography maths in src/ui/earthHandoff.ts.
+const earthCam = new Float64Array(3);
+const earthRel = new Float64Array(3);
+const earthSun = new Float64Array(3);
+const earthUp = new Float64Array(3);
+const walkOnEarth = mountWalkOnEarth({
+  canvas: renderer.domElement,
+  reducedMotion,
+  sample(): EarthSample | null {
+    const r = registry.resolveTarget(EARTH_ID);
+    if (!r || !r.radius) return null;
+    camera.getCameraWorldPosition(r.frameId, earthCam);
+    for (let i = 0; i < 3; i++) {
+      earthRel[i] = earthCam[i] - r.worldPos[i];
+      earthSun[i] = -r.worldPos[i]; // Sun = helio origin
+    }
+    const distanceR = Math.hypot(earthRel[0], earthRel[1], earthRel[2]) / r.radius;
+    return {
+      distanceR,
+      spot: () => spotUnderCamera(earthRel, camera.getCameraUp(earthUp), r.frameId === 'helio' ? earthSun : null, Date.now()),
+    };
+  },
+});
+
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
   camera.three.aspect = innerWidth / innerHeight;
@@ -212,6 +239,7 @@ renderer.setAnimationLoop((ms: number) => {
     scaleEl.textContent = tgt ? `Distance to target: ${formatDistance(camera.distanceTo(tgt))}` : '';
   }
   zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
+  walkOnEarth.update(); // Lumi: Earth handoff button / auto-trigger
   renderer.render(scene, camera.three);
 });
 
