@@ -23,6 +23,7 @@ import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import { register, type CatalogEntry } from '../catalog';
 import { GALAXY_PROFILES } from './galaxyProfiles';
 import { apparentPx, glowStyle, type GlowStyle } from './galaxyBlend';
+import { milkyWayFade } from './milkyWayFade';
 
 const LY_M = 9.4607e15; // metres per light-year (catalog distanceM only)
 const MLY_M = LY_M * 1e6; // metres per million light-years
@@ -424,6 +425,8 @@ export function createGalaxiesLayer(
 
   const scratch = new Float64Array(3);
   const tmpVec = new THREE.Vector3();
+  const SUN_ORIGIN = new Float64Array(3);
+  const MW_INDEX = byId.get('galaxy:common:milkyway') ?? -1;
   const style: GlowStyle = { px: 0, alpha: 1 };
 
   const layer: ScaleLayer = {
@@ -453,6 +456,7 @@ export function createGalaxiesLayer(
       // Device px per CSS px; the shader's size is in device px.
       const dpr = window.devicePixelRatio;
       const uScale = cssH * dpr * 0.5;
+      const mwFade = milkyWayFade(camera.distanceTo({ frame: 'galactic', position: SUN_ORIGIN }) / LY_M);
       for (let i = 0; i < n; i++) {
         scratch[0] = positionsPc[i * 3];
         scratch[1] = positionsPc[i * 3 + 1];
@@ -466,6 +470,10 @@ export function createGalaxiesLayer(
         const dist = tmpVec.length();
         const px = apparentPx(diametersPc[i] * scale, dist, fovRad, cssH);
         glowStyle(px, isProfiled[i], style);
+        // Lumi (P0 b): the Milky Way is profiled now, but from inside it is
+        // the star field, not a glow toward Sagittarius: its sprite fades
+        // with the mesh by distance from the Sun (milkyWayFade).
+        if (i === MW_INDEX) style.alpha *= mwFade;
         // aSize * uScale / dist = style.px * dpr  (shader attenuation)
         sizeAttr.setX(i, (style.px * dpr * dist) / uScale);
         alphaAttr.setX(i, style.alpha);

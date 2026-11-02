@@ -20,6 +20,75 @@ import type { LodState } from '../core/lod';
 import { createProceduralGalaxy, type GeneratedGalaxy } from '../galaxies/generator';
 import { GALAXY_PROFILES, generatorParamsFor } from '../layers/galaxyProfiles';
 import { PROC_MIN_PX, proceduralFade, proceduralPointSize } from '../layers/galaxyBlend';
+import { MW_FADE_LY, milkyWayFade } from '../layers/milkyWayFade';
+
+export { MW_FADE_LY, milkyWayFade };
+
+// ---- Milky Way (Lumi, P0 b, Stephon's 10:48 PM report) -----------------------
+// The Milky Way now has an SBbc profile (galaxyProfiles.ts). It can't be
+// oriented from incl/PA like the others (we only see it from inside): it is
+// laid in the galactic plane (milkyWayBasis), and it fades out where the star
+// field takes over (milkyWayFade) so it never draws over the in-galaxy view.
+export const MILKY_WAY_ID = 'galaxy:common:milkyway';
+/** North galactic pole (ICRS), same constant as galaxies.ts. */
+const NGP_RA_DEG = 192.859;
+const NGP_DEC_DEG = 27.128;
+/** Bar angle to the Sun-centre line, degrees (near end at positive longitude). */
+export const MW_BAR_ANGLE_DEG = 27;
+
+/**
+ * Basis for the Milky Way mesh at the Galactic Centre `gcPc` (Sun-centred
+ * ICRS, parsecs): Z = north galactic pole (disk normal), X = along the bar,
+ * MW_BAR_ANGLE_DEG from the centre-to-Sun line toward positive longitude.
+ */
+export function milkyWayBasis(gcPc: ArrayLike<number>, out = new THREE.Matrix4()): THREE.Matrix4 {
+  const ra = THREE.MathUtils.degToRad(NGP_RA_DEG);
+  const dec = THREE.MathUtils.degToRad(NGP_DEC_DEG);
+  const n = new THREE.Vector3(Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec));
+  // Galactic X (toward the centre, l = 0) projected into the plane; Y = l = 90.
+  const gx = new THREE.Vector3(gcPc[0], gcPc[1], gcPc[2]).normalize();
+  gx.addScaledVector(n, -gx.dot(n)).normalize();
+  const gy = new THREE.Vector3().crossVectors(n, gx).normalize();
+  const a = THREE.MathUtils.degToRad(MW_BAR_ANGLE_DEG);
+  // From the centre, the Sun is at -gx; the bar's near end is rotated toward +gy.
+  const bar = gx.clone().multiplyScalar(-Math.cos(a)).addScaledVector(gy, Math.sin(a)).normalize();
+  const side = new THREE.Vector3().crossVectors(n, bar).normalize();
+  return out.makeBasis(bar, side, n);
+}
+
+/** North galactic pole as a unit vector in the shared ICRS axes. */
+export function ngpUnit(out = new Float64Array(3)): Float64Array {
+  const ra = THREE.MathUtils.degToRad(NGP_RA_DEG);
+  const dec = THREE.MathUtils.degToRad(NGP_DEC_DEG);
+  out[0] = Math.cos(dec) * Math.cos(ra);
+  out[1] = Math.cos(dec) * Math.sin(ra);
+  out[2] = Math.sin(dec);
+  return out;
+}
+
+/** Elevation above the galactic plane the Milky Way arrival swings up to. */
+export const MW_VIEW_ELEVATION_DEG = 55;
+
+/**
+ * Where to look at the Milky Way from (Lumi, P0 b): a fly-to arrives along
+ * the Sun's line, i.e. exactly edge-on, so main.ts swings the camera to this
+ * direction (unit vector from the centre): same longitude as `offset`, raised
+ * MW_VIEW_ELEVATION_DEG above the plane on the north galactic side.
+ */
+export function milkyWayViewDir(offset: ArrayLike<number>, out = new Float64Array(3)): Float64Array {
+  const n = ngpUnit();
+  const d = offset[0] * n[0] + offset[1] * n[1] + offset[2] * n[2];
+  let px = offset[0] - d * n[0], py = offset[1] - d * n[1], pz = offset[2] - d * n[2];
+  let len = Math.hypot(px, py, pz);
+  if (len < 1e-12) { px = 1; py = 0; pz = 0; len = 1; } // straight above: any in-plane azimuth
+  const e = THREE.MathUtils.degToRad(MW_VIEW_ELEVATION_DEG);
+  out[0] = (Math.cos(e) * px) / len + Math.sin(e) * n[0];
+  out[1] = (Math.cos(e) * py) / len + Math.sin(e) * n[1];
+  out[2] = (Math.cos(e) * pz) / len + Math.sin(e) * n[2];
+  const l = Math.hypot(out[0], out[1], out[2]);
+  out[0] /= l; out[1] /= l; out[2] /= l;
+  return out;
+}
 
 interface Placed {
   id: string;
@@ -118,7 +187,9 @@ export function createProceduralGalaxiesLayer(
       const galaxy = createProceduralGalaxy(params);
       const holder = galaxy.container;
       holder.matrixAutoUpdate = true;
-      holder.quaternion.setFromRotationMatrix(skyBasis(target.worldPos));
+      holder.quaternion.setFromRotationMatrix(
+        id === MILKY_WAY_ID ? milkyWayBasis(target.worldPos) : skyBasis(target.worldPos),
+      );
       holder.frustumCulled = false;
       holder.traverse((o) => { o.frustumCulled = false; });
       group.add(holder);
@@ -141,6 +212,7 @@ export function createProceduralGalaxiesLayer(
   }
 
   const frame: FrameId = 'galactic';
+  const SUN_PC = new Float64Array(3);
   return {
     idPrefix: 'galaxy-mesh',
     frames: ['galactic', 'cosmic'],
@@ -158,6 +230,7 @@ export function createProceduralGalaxiesLayer(
       const s = camera.layerScale(frame) / METERS.pc; // render units per metre
       const viewportH = window.innerHeight;
       const fovRad = THREE.MathUtils.degToRad(camera.three.fov);
+      const mwFade = milkyWayFade(camera.distanceTo({ frame, position: SUN_PC }) / METERS.ly);
       for (const p of placed) {
         const c = p.galaxy.container;
         camera.toCameraRelative(p.posPc, frame, c.position);
@@ -166,9 +239,11 @@ export function createProceduralGalaxiesLayer(
         const px = (p.diameterM / Math.max(dist, 1)) / fovRad * viewportH;
         // Below PROC_MIN_PX the glow sprite alone stands for the galaxy.
         c.visible = px > PROC_MIN_PX;
+        if (p.id === MILKY_WAY_ID) c.visible = c.visible && mwFade > 0;
         if (c.visible) {
           p.galaxy.setLODTier(tierFor(dist, p.diameterM));
           applyProceduralFade(p.mats, px);
+          if (p.id === MILKY_WAY_ID) for (const m of p.mats) m.mat.opacity *= mwFade;
         }
       }
     },

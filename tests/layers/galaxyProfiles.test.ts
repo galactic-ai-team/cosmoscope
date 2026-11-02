@@ -79,8 +79,12 @@ describe('generatorParamsFor', () => {
     expect(p?.morphology).toBe('Sc');
   });
 
-  it('returns null for the Milky Way and for clusters', () => {
-    expect(generatorParamsFor('galaxy:common:milkyway')).toBeNull();
+  it('builds the Milky Way as a barred spiral (Lumi, P0 b) and returns null for clusters', () => {
+    const mw = generatorParamsFor('galaxy:common:milkyway');
+    expect(mw?.fromProfile).toBe(true);
+    expect(mw?.morphology).toBe('SBbc');
+    expect(mw?.morphology.startsWith('SB')).toBe(true); // the generator bars SB*
+    expect(mw?.diameterLy).toBe(100_000);
     expect(generatorParamsFor('cluster:common:virgo')).toBeNull();
     expect(generatorParamsFor('cluster:abell:1656')).toBeNull();
   });
