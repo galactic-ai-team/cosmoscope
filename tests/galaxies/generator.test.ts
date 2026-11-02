@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { createProceduralGalaxy, GalaxyProfile } from '../../src/galaxies/generator';
+import { createProceduralGalaxy } from '../../src/galaxies/generator';
+import type { GalaxyGeneratorParams } from '../../src/layers/galaxyProfiles';
 
 describe('Procedural Galaxy Generator', () => {
-  const testProfile: GalaxyProfile = {
+  const testProfile: GalaxyGeneratorParams = {
     id: 'm31',
     name: 'Andromeda Galaxy',
     morphology: 'Sb',
     diameterLy: 220000,
     inclinationDeg: 77,
-    positionAngleDeg: 35,
+    positionAngleDeg: 38,
     armCount: 2,
     pitchDeg: 12,
     bulgeFraction: 0.3,
