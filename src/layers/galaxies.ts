@@ -22,6 +22,7 @@ import type { FrameApi, CosmoCamera } from '../core/camera';
 import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import { register, type CatalogEntry } from '../catalog';
 import { GALAXY_PROFILES } from './galaxyProfiles';
+import { apparentPx, glowStyle, type GlowStyle } from './galaxyBlend';
 
 const LY_M = 9.4607e15; // metres per light-year (catalog distanceM only)
 const MLY_M = LY_M * 1e6; // metres per million light-years
@@ -370,6 +371,10 @@ export function createGalaxiesLayer(
   // Per-point size in render units, refilled in update() alongside positions.
   const sizes = new Float32Array(n);
   geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+  // Per-point intensity (Lumi, P0): unprofiled galaxies and clusters are a
+  // subtle point, profiled ones fade to a halo behind the procedural mesh.
+  const alphas = new Float32Array(n).fill(1);
+  geometry.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1));
   // Size-scaled sprites: each galaxy renders at its true angular size
   // (diameter / distance), so M31 at arrival fills ~a third of the view
   // instead of a fixed 6px dot. PointsMaterial can't do per-point size,
@@ -386,11 +391,14 @@ export function createGalaxiesLayer(
     },
     vertexShader: /* glsl */ `
       attribute float aSize;
+      attribute float aAlpha;
       uniform float uScale;
       uniform float uViewportH;
       varying vec3 vColor;
+      varying float vAlpha;
       void main() {
         vColor = color;
+        vAlpha = aAlpha;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         float px = aSize * (uScale / -mvPosition.z);
         gl_PointSize = clamp(px, 2.0, uViewportH * 0.4);
@@ -400,9 +408,10 @@ export function createGalaxiesLayer(
     fragmentShader: /* glsl */ `
       uniform sampler2D map;
       varying vec3 vColor;
+      varying float vAlpha;
       void main() {
         vec4 tex = texture2D(map, gl_PointCoord);
-        gl_FragColor = vec4(vColor, 0.95) * tex;
+        gl_FragColor = vec4(vColor, 0.95 * vAlpha) * tex;
       }
     `,
     vertexColors: true,
@@ -415,6 +424,7 @@ export function createGalaxiesLayer(
 
   const scratch = new Float64Array(3);
   const tmpVec = new THREE.Vector3();
+  const style: GlowStyle = { px: 0, alpha: 1 };
 
   const layer: ScaleLayer = {
     idPrefix: 'galaxy',
@@ -434,35 +444,40 @@ export function createGalaxiesLayer(
     update(_dt: number, _distance: number, _api: FrameApi): void {
       const attr = geometry.getAttribute('position') as THREE.BufferAttribute;
       const sizeAttr = geometry.getAttribute('aSize') as THREE.BufferAttribute;
+      const alphaAttr = geometry.getAttribute('aAlpha') as THREE.BufferAttribute;
       // Render units per galactic parsec — same scale toCameraRelative
       // applies to positions, so sizes and positions stay in one space.
       const scale = camera.layerScale('galactic');
+      const fovRad = THREE.MathUtils.degToRad(camera.three.fov);
+      const cssH = window.innerHeight;
+      // Device px per CSS px; the shader's size is in device px.
+      const dpr = window.devicePixelRatio;
+      const uScale = cssH * dpr * 0.5;
       for (let i = 0; i < n; i++) {
         scratch[0] = positionsPc[i * 3];
         scratch[1] = positionsPc[i * 3 + 1];
         scratch[2] = positionsPc[i * 3 + 2];
         camera.toCameraRelative(scratch, 'galactic', tmpVec);
         attr.setXYZ(i, tmpVec.x, tmpVec.y, tmpVec.z);
-        let size = diametersPc[i] * scale;
-        if (isProfiled[i] && diametersPc[i] > 0) {
-          // k = camera distance in galaxy diameters (tmpVec is render
-          // units; scale is render units per parsec). Full glow beyond
-          // 10 diameters, 30% halo inside 3, linear between — so the
-          // sprite and the procedural mesh crossfade instead of stacking.
-          const k = tmpVec.length() / scale / diametersPc[i];
-          const halo = k >= 10 ? 1 : k <= 3 ? 0.3 : 0.3 + (0.7 * (k - 3)) / 7;
-          size *= halo;
-        }
-        sizeAttr.setX(i, size);
+        // Lumi (P0, Stephon 10:48 PM): one blend rule shared with the
+        // procedural layer (galaxyBlend.ts). Profiled galaxies: whole glow
+        // while the mesh is hidden, halo once it fades in. Unprofiled
+        // galaxies + clusters: a subtle point, never the old big glow blob.
+        const dist = tmpVec.length();
+        const px = apparentPx(diametersPc[i] * scale, dist, fovRad, cssH);
+        glowStyle(px, isProfiled[i], style);
+        // aSize * uScale / dist = style.px * dpr  (shader attenuation)
+        sizeAttr.setX(i, (style.px * dpr * dist) / uScale);
+        alphaAttr.setX(i, style.alpha);
       }
       attr.needsUpdate = true;
       sizeAttr.needsUpdate = true;
+      alphaAttr.needsUpdate = true;
       // Viewport height in device pixels (drawing-buffer height) for the
       // attenuation math. Assumes a fullscreen canvas — main.ts can pass
       // renderer.getDrawingBufferSize() later for exactness.
-      const viewportH = window.innerHeight * window.devicePixelRatio;
-      material.uniforms.uScale.value = viewportH * 0.5;
-      material.uniforms.uViewportH.value = viewportH;
+      material.uniforms.uScale.value = uScale;
+      material.uniforms.uViewportH.value = cssH * dpr;
     },
 
     resolveTarget: resolveGalaxyTarget,
