@@ -191,7 +191,7 @@ export function parseExoplanetData(
       distancePc: s.distancePc,
       raDeg: s.raDeg,
       decDeg: s.decDeg,
-      starCount: s.starCount,
+      starCount: s.starCount as number,
       planets,
     };
 
