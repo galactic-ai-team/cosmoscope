@@ -146,3 +146,20 @@ describe('mountFreeFlyUi', () => {
     expect(s.speeds).toEqual([2, -2]);
   });
 });
+
+describe('mountFreeFlyUi: Esc (Lumi, P0 c)', () => {
+  it('Esc leaves free-fly, but does nothing when not flying or when typing', () => {
+    const s = setup();
+    s.doc.fire('keydown', { code: 'Escape', target: null });
+    expect(s.toggles()).toBe(0); // not flying: Esc is someone else's (search, help)
+    s.doc.fire('keydown', { code: 'KeyF', target: null });
+    expect(s.fly.enabled).toBe(true);
+    s.doc.fire('keydown', { code: 'Escape', target: { tagName: 'INPUT' } });
+    expect(s.fly.enabled).toBe(true);
+    s.doc.fire('keydown', { code: 'Escape', target: null });
+    expect(s.fly.enabled).toBe(false);
+    expect(s.toggles()).toBe(2);
+    expect(s.btn.getAttribute('aria-pressed')).toBe('false');
+    expect(s.pad.hidden).toBe(true);
+  });
+});

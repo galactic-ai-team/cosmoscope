@@ -3,7 +3,7 @@
 // phones, the nearest-body pick for speed scaling, and the "fly into Earth"
 // trigger for the earth-walker handoff.
 //
-// - Toggle: "Free-fly" button (bottom right) or the F key.
+// - Toggle: "Free-fly" button (bottom right) or the F key; Esc also exits.
 // - Desktop: WASD / arrows, mouse look (click to lock the pointer, Esc to
 //   release), E/Space up, Q down, Z/X roll, Shift boost, wheel = speed.
 // - Touch (iPhone): left half of the screen is the move stick and the right
@@ -189,6 +189,13 @@ export function mountFreeFlyUi(deps: FreeFlyUiDeps): { sync(): void } {
 
   btn.addEventListener('click', (e) => { e.stopPropagation(); deps.toggle(); sync(); });
   doc.addEventListener('keydown', (e) => {
+    // Esc also leaves free-fly (Lumi, P0 c). While the pointer is locked the
+    // browser spends the first Esc on releasing the lock; the next one exits.
+    if (e.code === 'Escape' && fly.enabled && !e.repeat && !typing(e.target)) {
+      deps.toggle();
+      sync();
+      return;
+    }
     if (e.code !== FLY_TOGGLE_CODE || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
     deps.toggle();
     sync();

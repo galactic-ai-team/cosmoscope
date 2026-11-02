@@ -17,7 +17,7 @@ import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute, nearestGalaxy } from './layers/galaxies';
 import { createCosmicWebLayer } from './layers/cosmicWebLayer';
-import { createProceduralGalaxiesLayer } from './ui/proceduralGalaxies';
+import { MILKY_WAY_ID, createProceduralGalaxiesLayer, milkyWayViewDir, ngpUnit } from './ui/proceduralGalaxies';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
@@ -43,6 +43,7 @@ import { createStarGlow } from './ui/starGlow';
 import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
 import { mountWalkOnEarth, type EarthSample } from './ui/walkOnEarth';
 import { CosmoFlyControls } from './core/flyControls';
+import { EXIT_TURN_S, chooseOrbitTarget, easeInOut, slerpDir, type OrbitCandidate } from './ui/flyExit';
 import { FLY_BODY_IDS, createFlyIntoEarthTrigger, freeFlySpeedForDistance, mountFreeFlyUi, pickNearestBody, type BodyCandidate } from './ui/freeFly';
 
 const MAX_DT = 0.1;
@@ -180,6 +181,16 @@ const flyer: Flyer = {
       t.id.startsWith('exo:') ? t.id : null,
     );
     currentFlight = flight.flyTo(t, at ?? now);
+    if (t.id === MILKY_WAY_ID && r) {
+      // P0 b (Lumi): the arrival is along the Sun's line, i.e. edge-on. Orbit
+      // the galactic pole instead, and once there swing up above the disk so
+      // the barred spiral shows (any input or new flight cancels the swing).
+      controls.setUp(ngpUnit());
+      const h = currentFlight;
+      void h.promise.then(() => {
+        if (currentFlight === h && !fly.enabled && !flight.active) startMwSwing(r.worldPos);
+      });
+    }
     return currentFlight;
   },
 };
@@ -297,7 +308,7 @@ const freeFlyUi = mountFreeFlyUi({
   toggle() {
     if (fly.enabled) {
       fly.stop();
-      controls.setMinDistance(0); // the orbit target is now just a point ahead
+      orbitAfterFly(); // P0 (c): orbit + zoom around a real body again
       return;
     }
     // Free-fly cancels any flight and the tour, then keeps the current view.
@@ -310,6 +321,106 @@ const freeFlyUi = mountFreeFlyUi({
   },
 });
 const flyIntoEarth = createFlyIntoEarthTrigger();
+
+// ---- Milky Way arrival swing (Lumi, P0 b) ---------------------------------------
+const MW_SWING_S = 1.6;
+const mwSwing = { active: false, t: 0, from: new Float64Array(3), to: new Float64Array(3), dist: 0, centre: new Float64Array(3) };
+const mwCam = new Float64Array(3);
+const mwDir = new Float64Array(3);
+const mwPos = new Float64Array(3);
+function startMwSwing(centre: ArrayLike<number>): void {
+  camera.getCameraWorldPosition('galactic', mwCam);
+  for (let i = 0; i < 3; i++) mwSwing.from[i] = mwCam[i] - centre[i];
+  mwSwing.dist = Math.hypot(mwSwing.from[0], mwSwing.from[1], mwSwing.from[2]);
+  if (!(mwSwing.dist > 0)) return;
+  for (let i = 0; i < 3; i++) { mwSwing.from[i] /= mwSwing.dist; mwSwing.centre[i] = centre[i]; }
+  milkyWayViewDir(mwSwing.from, mwSwing.to);
+  mwSwing.t = 0;
+  mwSwing.active = true;
+  if (reducedMotion) stepMwSwing(MW_SWING_S);
+}
+function stepMwSwing(dt: number): void {
+  if (!mwSwing.active) return;
+  mwSwing.t = Math.min(1, mwSwing.t + dt / MW_SWING_S);
+  slerpDir(mwSwing.from, mwSwing.to, easeInOut(mwSwing.t), mwDir);
+  for (let i = 0; i < 3; i++) mwPos[i] = mwSwing.centre[i] + mwDir[i] * mwSwing.dist;
+  camera.setPose({ frame: 'galactic', position: mwPos, target: { frame: 'galactic', position: mwSwing.centre }, up: ngpUnit() });
+  if (mwSwing.t >= 1) mwSwing.active = false;
+}
+controls.onUserInput(() => {
+  if (!mwSwing.active) return;
+  mwSwing.active = false;
+  if (!flight.active && !fly.enabled) controls.enabled = true; // so this same input applies
+});
+
+// ---- leaving free-fly (Lumi, P0 c): orbit a real body again -------------------
+// Free-fly's look-at point is an empty spot ahead, and its up is whatever roll
+// you flew with. On exit: pick the nearest body (or the last pick if it's
+// close enough, src/ui/flyExit.ts), turn to face it over EXIT_TURN_S, and put
+// the orbit axis back (CosmoControls eases the camera's up onto it).
+const exitTurn = {
+  active: false,
+  t: 0,
+  dir0: new Float64Array(3),
+  target: null as OrbitCandidate | null,
+};
+const exitCam = new Float64Array(3);
+const exitDir = new Float64Array(3);
+const exitPos = new Float64Array(3);
+const exitTgt = new Float64Array(3);
+function orbitCandidates(): OrbitCandidate[] {
+  const out: OrbitCandidate[] = [];
+  const ids = lastPickId && !FLY_BODY_IDS.includes(lastPickId) ? [...FLY_BODY_IDS, lastPickId] : FLY_BODY_IDS;
+  for (const id of ids) {
+    const r = registry.resolveTarget(id);
+    if (!r) continue;
+    out.push({ id, point: { frame: r.frameId, position: r.worldPos }, radius: r.radius ? r.radius * camera.unitsPerFrame(r.frameId) : 0 });
+  }
+  const g = nearestGalaxy(camera.getCameraWorldPosition('galactic', flyGalPos));
+  if (g) out.push({ id: g.id, point: { frame: 'galactic', position: Float64Array.from(g.position) }, radius: 0 });
+  return out;
+}
+/** Aim the camera at the exit target, fraction `t` of the way from dir0. */
+function applyExitTurn(t: number): void {
+  const tg = exitTurn.target!;
+  const f = tg.point.frame;
+  camera.getCameraWorldPosition(f, exitCam);
+  for (let i = 0; i < 3; i++) exitDir[i] = tg.point.position[i] - exitCam[i];
+  const d = Math.hypot(exitDir[0], exitDir[1], exitDir[2]);
+  if (!(d > 0)) return;
+  for (let i = 0; i < 3; i++) exitDir[i] /= d;
+  slerpDir(exitTurn.dir0, exitDir, easeInOut(t), exitDir);
+  for (let i = 0; i < 3; i++) exitTgt[i] = exitCam[i] + exitDir[i] * d;
+  const camFrame = camera.getFrameId();
+  camera.getCameraWorldPosition(camFrame, exitPos);
+  camera.setPose({ frame: camFrame, position: exitPos, target: { frame: f, position: t >= 1 ? tg.point.position : exitTgt } });
+}
+function orbitAfterFly(): void {
+  controls.stop();
+  const tg = chooseOrbitTarget(orbitCandidates(), (p) => camera.distanceTo(p), lastPickId);
+  if (!tg) { controls.setMinDistance(0); return; }
+  lastPickId = tg.id; // the readout and the orbit agree on the object
+  controls.setUp(orbitUpFor(tg.point.frame));
+  controls.setMinDistance(tg.radius ? 1.05 * tg.radius : 0);
+  exitTurn.target = tg;
+  camera.getCameraForward(exitTurn.dir0);
+  exitTurn.t = 0;
+  exitTurn.active = !reducedMotion;
+  if (reducedMotion) applyExitTurn(1);
+}
+function stepExitTurn(dt: number): void {
+  if (!exitTurn.active) return;
+  exitTurn.t = Math.min(1, exitTurn.t + dt / EXIT_TURN_S);
+  applyExitTurn(exitTurn.t);
+  if (exitTurn.t >= 1) exitTurn.active = false;
+}
+// Any orbit input during the turn finishes it at once (so the input applies).
+controls.onUserInput(() => {
+  if (!exitTurn.active) return;
+  exitTurn.active = false;
+  applyExitTurn(1);
+  if (!flight.active && !fly.enabled) controls.enabled = true; // so this same input applies
+});
 
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
@@ -336,7 +447,10 @@ renderer.setAnimationLoop((ms: number) => {
   last = now;
 
   flight.update(now);   // Dee: moves the camera along the log-space path
-  controls.enabled = !flight.active && !fly.enabled; // Claude: controls stand down mid-flight and in free-fly
+  if (fly.enabled || flight.active) { exitTurn.active = false; mwSwing.active = false; }
+  stepExitTurn(dt);
+  stepMwSwing(dt);      // Lumi: Milky Way arrival swings above the disk     // Lumi: turn onto the orbit target after free-fly
+  controls.enabled = !flight.active && !fly.enabled && !exitTurn.active && !mwSwing.active; // Claude: controls stand down mid-flight and in free-fly
   controls.update(dt);  // Claude: eased orbit/zoom around the target
   fly.update(dt);       // Claude: free-fly (no-op unless enabled)
   if (!flight.active) {  // Lumi: helio <-> galactic <-> cosmic by distance from the Sun (exact rebase)
