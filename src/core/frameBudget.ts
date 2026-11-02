@@ -1,17 +1,17 @@
 // src/core/frameBudget.ts
 // Frame-time budget tracker. Emits an alarm when a configurable fraction of
-// the frames in a trailing window exceed the budget. Used to drive LOD tier
-// bias and (later) adaptive quality.
+// the frames in a trailing window exceed the budget.
 //
 // Semantics:
 //   - Tracks frames in a ring buffer of `windowSize`.
 //   - Every frame, counts how many entries in the window are over budget.
 //   - If overCount / windowSize > threshold, fires onOverBudget.
-//   - Fires at most once per `cooldownFrames` frames to avoid alarm spam.
-//   - This is a *trailing window* count, not a consecutive-frame streak. A
-//     budget alarm should reflect "recent frames are slow", not "the last N
-//     frames were slow" — a single fast frame between two slow ones should not
-//     reset a real perf problem.
+//   - Fires at most once per `cooldownFrames` frames.
+//   - Trailing window, not consecutive-streak: a single fast frame between
+//     two slow ones does NOT reset the count.
+//   - Warming: the window must be FULL before any alarm can fire. This makes
+//     the alarm robust against early single-frame spikes and gives callers a
+//     consistent "you must observe `windowSize` frames before I judge" rule.
 
 export interface FrameBudgetOptions {
   /** Frame budget in milliseconds. Frames slower than this count as over. */
@@ -56,7 +56,6 @@ export class FrameBudget {
   tick(frameMs: number): boolean {
     const over = frameMs > this.budgetMs ? 1 : 0;
 
-    // Evict the oldest entry if the ring is full.
     if (this.ringCount === this.windowSize) {
       const evicted = this.ring[this.ringHead];
       if (evicted > this.budgetMs) this.overCount--;
@@ -70,9 +69,8 @@ export class FrameBudget {
 
     this.framesSinceAlarm++;
 
-    // Only consider alarms once the window is warm (or at least half-filled,
-    // so an early spike doesn't fire before we have data).
-    const warm = this.ringCount >= this.windowSize / 2;
+    // Warm-up: window must be full before any alarm can fire.
+    const warm = this.ringCount >= this.windowSize;
     const overFraction = this.ringCount > 0 ? this.overCount / this.ringCount : 0;
     const alarmWanted = warm && overFraction > this.threshold;
 
@@ -88,17 +86,14 @@ export class FrameBudget {
     return false;
   }
 
-  /** Fraction of the current window that is over budget (0..1). */
   get overFraction(): number {
     return this.ringCount > 0 ? this.overCount / this.ringCount : 0;
   }
 
-  /** Number of frames currently tracked (0..windowSize). */
   get trackedFrames(): number {
     return this.ringCount;
   }
 
-  /** Reset all state. Useful for tests and scene reloads. */
   reset(): void {
     this.ring.fill(0);
     this.ringHead = 0;
