@@ -17,6 +17,68 @@
  #tour{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:5;padding:8px 14px;border-radius:999px;border:1px solid #fff4;background:#0008;color:inherit;font:inherit;font-size:13px;cursor:pointer}
  #tour[aria-pressed="true"]{background:#fff2}
  #scale{position:fixed;left:16px;bottom:16px;font-size:13px;opacity:.8;z-index:5}
+/* GPT-6: mobile HUD spacing — 390x844 and smaller phones */
+@media (max-width: 480px) {
+  /* Row 1: current location / universe scale */
+  #zone {
+    top: max(12px, env(safe-area-inset-top));
+    left: 12px;
+    right: 12px;
+    max-width: calc(100vw - 24px);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Row 2: Constellations and Help */
+  #constellations-btn {
+    top: calc(max(12px, env(safe-area-inset-top)) + 30px) !important;
+    right: 58px !important;
+  }
+
+  #help-btn {
+    top: calc(max(12px, env(safe-area-inset-top)) + 30px) !important;
+    right: 16px !important;
+  }
+
+  /* Row 3: Search */
+  #search {
+    top: calc(max(12px, env(safe-area-inset-top)) + 78px);
+    width: calc(100vw - 24px);
+    max-width: 420px;
+  }
+
+  #search ul {
+    max-height: min(40vh, 280px);
+  }
+
+  /* Keep Earth handoff below search */
+  #walk-earth {
+    top: calc(max(12px, env(safe-area-inset-top)) + 132px) !important;
+    bottom: auto !important;
+  }
+
+  /* Move distance above Grand Tour and free-fly controls */
+  #scale {
+    left: 12px;
+    right: 12px;
+    bottom: calc(188px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 24px);
+    font-size: 12px;
+    line-height: 17px;
+    pointer-events: none;
+  }
+
+  #tour {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  #free-fly {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
 </style>
 </head>
 <body>
