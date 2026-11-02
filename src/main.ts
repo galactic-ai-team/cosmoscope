@@ -97,7 +97,20 @@ registry.register(galaxiesLayer);
 // Lumi glue: Gemini's procedural galaxies for Nova's profiled galaxies.
 registry.register(createProceduralGalaxiesLayer(scene, camera, (id) => galaxiesLayer.resolveTarget(id)));
 registry.register(clustersRoute);
-registry.register(new SolarSystemLayer(scene, camera));
+const solarSystem = new SolarSystemLayer(scene, camera);
+registry.register(solarSystem);
+// Lumi (mechanical, for Claude's #70): the registry routes ids by prefix, and
+// SolarSystemLayer's is 'planet', so 'moon:*' ids (search, deep links, free-fly
+// bodies) never reached its new moon resolver. Route them like clustersRoute.
+registry.register({
+  idPrefix: 'moon',
+  frames: [],
+  renderBudget: 0,
+  enter() {},
+  exit() {},
+  update() {},
+  resolveTarget: (id) => solarSystem.resolveTarget(id),
+});
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
 
 // Register Cosmic Web layer
