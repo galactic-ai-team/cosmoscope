@@ -13,6 +13,7 @@ export const HELP_ITEMS: readonly HelpItem[] = [
   { keys: 'Arrow keys', does: 'Orbit around what you’re looking at' },
   { keys: '+ / −', does: 'Zoom in or out' },
   { keys: 'H', does: 'Fly home to the Sun' },
+  { keys: 'Near Earth', does: 'Walk on Earth button, or keep zooming in, to land in earth-walker' },
   { keys: 'C', does: 'Constellation lines: Auto / On / Off' },
   { keys: '?', does: 'Show or hide this help' },
   { keys: 'Esc', does: 'Close this help' },
