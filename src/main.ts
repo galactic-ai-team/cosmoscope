@@ -41,7 +41,7 @@ import { createStarGlow } from './ui/starGlow';
 import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
 import { mountWalkOnEarth, type EarthSample } from './ui/walkOnEarth';
 import { CosmoFlyControls } from './core/flyControls';
-import { FLY_BODY_IDS, createFlyIntoEarthTrigger, mountFreeFlyUi, pickNearestBody, type BodyCandidate } from './ui/freeFly';
+import { FLY_BODY_IDS, createFlyIntoEarthTrigger, freeFlySpeedForDistance, mountFreeFlyUi, pickNearestBody, type BodyCandidate } from './ui/freeFly';
 
 const MAX_DT = 0.1;
 const HYG_URL = '/data/hyg-v41.json';
@@ -264,6 +264,7 @@ const walkOnEarth = mountWalkOnEarth({
 const flyCands: BodyCandidate[] = [];
 const fly = new CosmoFlyControls(camera, {
   reducedMotion,
+  speedForDistance: freeFlySpeedForDistance, // full gap per second (Claude's default is half)
   nearestBody() {
     flyCands.length = 0;
     const ids = lastPickId && !FLY_BODY_IDS.includes(lastPickId) ? [...FLY_BODY_IDS, lastPickId] : FLY_BODY_IDS;

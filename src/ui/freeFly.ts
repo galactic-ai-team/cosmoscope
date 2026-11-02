@@ -44,11 +44,26 @@ export function pickNearestBody(cands: readonly BodyCandidate[], distanceTo: (p:
 }
 
 export const FLY_INTO_EARTH = {
-  /** Fire when free-flying closer than this many rendered Earth radii (fly clearance is 1.002). */
-  fireAtR: 1.01,
+  /**
+   * Fire when free-flying closer than this many rendered Earth radii (fly
+   * clearance is 1.002). 1.05 per Claude's #64 review: the last stretch is the
+   * slowest, and at 1.05 R Earth already fills the screen.
+   */
+  fireAtR: 1.05,
   /** Re-arm only after getting this far out again. */
   rearmAtR: 1.2,
 };
+
+/**
+ * Free-fly cruise speed: the FULL gap to the nearest surface per second (at
+ * least 2 m/s), twice Claude's default of half the gap, so 9 R -> Earth holding
+ * W takes about 5-6 s instead of ~11 s (Claude's #64 answer 4). Passed as
+ * CosmoFlyControls' speedForDistance option; Dee's curve replaces it once #57 lands.
+ */
+export const FREE_FLY_GAP_PER_S = 1;
+export function freeFlySpeedForDistance(metres: number): number {
+  return Math.max(2, FREE_FLY_GAP_PER_S * metres);
+}
 
 export interface FlyIntoEarthTrigger {
   /** Call every frame; true on the frame the handoff should fire. */

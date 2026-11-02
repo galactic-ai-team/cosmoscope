@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FLY_BODY_IDS, FLY_INTO_EARTH, createFlyIntoEarthTrigger, mountFreeFlyUi, pickNearestBody } from '../../src/ui/freeFly';
+import { FLY_BODY_IDS, FLY_INTO_EARTH, createFlyIntoEarthTrigger, freeFlySpeedForDistance, mountFreeFlyUi, pickNearestBody } from '../../src/ui/freeFly';
+import { defaultSpeedForDistance } from '../../src/core/flyControls';
 import type { FramedPoint } from '../../src/core/camera';
 
 const pt = (x: number): FramedPoint => ({ frame: 'helio', position: [x, 0, 0] });
@@ -21,6 +22,27 @@ describe('pickNearestBody', () => {
   });
 });
 
+describe('freeFlySpeedForDistance', () => {
+  it('is the full gap per second: twice Claude\'s default, same 2 m/s floor', () => {
+    expect(freeFlySpeedForDistance(1e7)).toBe(1e7);
+    expect(freeFlySpeedForDistance(1e7)).toBe(2 * defaultSpeedForDistance(1e7));
+    expect(freeFlySpeedForDistance(0.5)).toBe(2);
+  });
+  it('9 R -> 1.05 R holding W takes about 5-6 s (ideal exponential approach)', () => {
+    // gap shrinks as d(gap)/dt = -speed(gap); from 8 R gap to 0.05 R gap.
+    const R = 6.371e6;
+    let gap = 8 * R;
+    let t = 0;
+    const dt = 1 / 60;
+    while (gap > 0.05 * R && t < 60) {
+      gap -= freeFlySpeedForDistance(gap) * dt;
+      t += dt;
+    }
+    expect(t).toBeGreaterThan(4.5);
+    expect(t).toBeLessThan(6.5);
+  });
+});
+
 describe('createFlyIntoEarthTrigger', () => {
   it('fires once when free-flying inside fireAtR, re-arms only past rearmAtR', () => {
     const t = createFlyIntoEarthTrigger();
@@ -33,6 +55,17 @@ describe('createFlyIntoEarthTrigger', () => {
     expect(t.update(1.3, true)).toBe(false);
     expect(t.armed).toBe(true);
     expect(t.update(1.009, true)).toBe(true);
+  });
+  it('fires at 1.05 R (Claude #64 review) and re-arms at 1.2 R', () => {
+    expect(FLY_INTO_EARTH.fireAtR).toBe(1.05);
+    expect(FLY_INTO_EARTH.rearmAtR).toBe(1.2);
+    const t = createFlyIntoEarthTrigger();
+    expect(t.update(1.06, true)).toBe(false);
+    expect(t.update(1.049, true)).toBe(true);
+    expect(t.update(1.19, true)).toBe(false);
+    expect(t.armed).toBe(false);
+    expect(t.update(1.21, true)).toBe(false);
+    expect(t.armed).toBe(true);
   });
   it('never fires when not free-flying (orbit mode has its own trigger)', () => {
     const t = createFlyIntoEarthTrigger();
