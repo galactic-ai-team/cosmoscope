@@ -1,122 +1,221 @@
 import * as THREE from 'three';
+import { METERS } from '../core/frames';
 
-export interface GalaxyParams {
-  type: 'spiral' | 'elliptical' | 'irregular';
-  starCount: number;
-  radius: number; // in kiloparsecs (kpc)
-  arms?: number;
-  pitchAngle?: number; // radians
-  bulgeRadius: number;
-  innerColor: THREE.Color;
-  outerColor: THREE.Color;
-  eccentricity?: number; // for elliptical
-  scatter?: number;
+export interface GalaxyProfile {
+  id: string;
+  name: string;
+  morphology: 'Sa' | 'Sb' | 'Sc' | 'SBb' | 'SBc' | 'E' | 'Irr' | 'dSph' | string;
+  diameterLy: number;
+  inclinationDeg: number;
+  positionAngleDeg: number;
+  armCount: number;
+  pitchDeg: number;
+  bulgeFraction: number;
+  dustStrength: number;
+  starCountNear: number;
+  seed: number;
 }
 
 export interface GeneratedGalaxy {
-  geometry: THREE.BufferGeometry;
-  material: THREE.PointsMaterial;
-  mesh: THREE.Points;
+  container: THREE.Group;
+  setLODTier(tier: number): void;
+  dispose(): void;
 }
 
-export function createProceduralGalaxy(params: GalaxyParams): GeneratedGalaxy {
-  const count = params.starCount;
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
+// Seeded PRNG (Mulberry32)
+function createSeededRng(seed: number) {
+  let t = seed += 0x6d2b79f5;
+  return function () {
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
 
-  const colorInside = params.innerColor;
-  const colorOutside = params.outerColor;
-  const scatter = params.scatter ?? 0.15;
-  const arms = params.arms ?? 2;
-  const pitch = params.pitchAngle ?? 0.5;
+// Generate soft circular particle texture
+function createParticleTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(220,235,255,0.8)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
 
-  const colorMix = new THREE.Color();
+interface StarParticle {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  g: number;
+  b: number;
+  importance: number; // For sorting into LOD tiers
+  isDust: boolean;
+}
 
-  for (let i = 0; i < count; i++) {
-    const i3 = i * 3;
+export function createProceduralGalaxy(profile: GalaxyProfile): GeneratedGalaxy {
+  const container = new THREE.Group();
+  container.name = `galaxy:${profile.id}`;
 
-    // Decide if star belongs to bulge or disk/arms
-    const isBulge = Math.random() < 0.25;
-    let radius = 0;
-    let x = 0;
-    let y = 0;
-    let z = 0;
+  const rng = createSeededRng(profile.seed);
+  const radiusMeters = (profile.diameterLy / 2) * METERS.ly;
 
-    if (isBulge || params.type === 'elliptical') {
-      // Spherical or ellipsoidal bulge distribution
-      const r = Math.pow(Math.random(), 2) * params.bulgeRadius;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos((Math.random() * 2) - 1);
+  const totalStars = Math.min(Math.max(profile.starCountNear, 1000), 15000);
+  const stars: StarParticle[] = [];
 
-      const ecc = params.eccentricity ?? 1.0;
+  const isBarred = profile.morphology.startsWith('SB');
+  const isElliptical = profile.morphology === 'E' || profile.morphology === 'dSph';
+  const isIrregular = profile.morphology === 'Irr';
+
+  const arms = profile.armCount > 0 ? profile.armCount : 2;
+  const pitchRad = THREE.MathUtils.degToRad(profile.pitchDeg || 15);
+
+  const coreColor = new THREE.Color(0xfff5e6); // Warm yellow-white bulge
+  const armColor = new THREE.Color(0x88ccff);  // Young blue star clusters
+  const dustColor = new THREE.Color(0x2a1a12); // Dark brown/red dust
+
+  // 1. Generate Star & Dust Population
+  for (let i = 0; i < totalStars; i++) {
+    const isDust = i < totalStars * (profile.dustStrength * 0.15);
+    const isBulge = !isIrregular && !isElliptical && (rng() < profile.bulgeFraction);
+
+    let x = 0, y = 0, z = 0;
+    let importance = rng();
+
+    if (isElliptical || isIrregular) {
+      const r = Math.pow(rng(), 0.6) * radiusMeters;
+      const theta = rng() * Math.PI * 2;
+      const phi = Math.acos((rng() * 2) - 1);
       x = r * Math.sin(phi) * Math.cos(theta);
-      y = r * Math.sin(phi) * Math.sin(theta) * (params.type === 'elliptical' ? ecc : 0.6);
-      z = r * Math.cos(phi);
-
-      radius = r;
-    } else if (params.type === 'spiral') {
-      // Logarithmic spiral arms
-      const r = Math.pow(Math.random(), 0.8) * params.radius;
-      const armIndex = Math.floor(Math.random() * arms);
-      const armOffsetAngle = (armIndex / arms) * Math.PI * 2;
+      y = r * Math.sin(phi) * Math.sin(theta) * 0.5;
+      z = r * Math.cos(phi) * (isElliptical ? 0.7 : 0.4);
+    } else if (isBulge) {
+      const r = Math.pow(rng(), 2) * (radiusMeters * profile.bulgeFraction);
+      const theta = rng() * Math.PI * 2;
+      const phi = Math.acos((rng() * 2) - 1);
       
-      // Logarithmic spiral formula: theta = ln(r / r0) / tan(pitch)
-      const spiralAngle = (Math.log(Math.max(r, 0.1) / 0.5) / Math.tan(pitch)) + armOffsetAngle;
-
-      // Add Gaussian-like scatter around the arm curve
-      const randomSkewX = (Math.random() - 0.5) * scatter * r;
-      const randomSkewZ = (Math.random() - 0.5) * scatter * r;
-      const verticalScatter = (Math.random() - 0.5) * 0.1 * params.radius * (1 - r / params.radius);
-
-      x = Math.cos(spiralAngle) * r + randomSkewX;
-      z = Math.sin(spiralAngle) * r + randomSkewZ;
-      y = verticalScatter;
-
-      radius = r;
+      // Barred spiral core elongation
+      const barStretch = isBarred && rng() < 0.5 ? 2.5 : 1.0;
+      x = r * Math.sin(phi) * Math.cos(theta) * barStretch;
+      y = r * Math.sin(phi) * Math.sin(theta) * 0.4;
+      z = r * Math.cos(phi) * 0.6;
+      importance += 0.5; // Bulge/core stars are prominent
     } else {
-      // Irregular galaxy (clumpy, scattered distribution)
-      const r = Math.random() * params.radius;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = (Math.random() - 0.5) * Math.PI * 0.5;
+      // Spiral disk & arms
+      const r = Math.pow(rng(), 0.8) * radiusMeters;
+      const armIdx = Math.floor(rng() * arms);
+      const armOffsetAngle = (armIdx / arms) * Math.PI * 2;
+      
+      // Logarithmic spiral math
+      const spiralAngle = (Math.log(Math.max(r, radiusMeters * 0.05) / (radiusMeters * 0.1)) / Math.tan(pitchRad)) + armOffsetAngle;
+      
+      let scatter = 0.12 * radiusMeters;
+      if (isDust) {
+        // Dust lanes ride the inner edge of spiral arms
+        scatter *= 0.8;
+      }
 
-      x = r * Math.cos(phi) * Math.cos(theta);
-      z = r * Math.cos(phi) * Math.sin(theta);
-      y = r * Math.sin(phi) * 0.5;
+      const offsetX = (rng() - 0.5) * scatter * (r / radiusMeters);
+      const offsetZ = (rng() - 0.5) * scatter * (r / radiusMeters);
+      const verticalScatter = (rng() - 0.5) * 0.03 * radiusMeters * (1 - r / radiusMeters);
 
-      radius = r;
+      x = Math.cos(spiralAngle) * r + offsetX;
+      z = Math.sin(spiralAngle) * r + offsetZ;
+      y = verticalScatter;
     }
 
-    positions[i3] = x;
-    positions[i3 + 1] = y;
-    positions[i3 + 2] = z;
+    // Colors
+    const distRatio = Math.hypot(x, z) / radiusMeters;
+    const color = new THREE.Color();
+    if (isDust) {
+      color.copy(dustColor);
+      importance *= 0.2;
+    } else {
+      color.copy(coreColor).lerp(armColor, Math.min(distRatio * 1.2, 1.0));
+      // Random stellar variation
+      const lum = 0.7 + rng() * 0.6;
+      color.multiplyScalar(lum);
+    }
 
-    // Color gradient based on distance from center (older redder stars in core, blue arms)
-    const normalizedDist = Math.min(radius / params.radius, 1.0);
-    colorMix.copy(colorInside).lerp(colorOutside, normalizedDist);
-
-    // Add slight random color variation per star
-    const lum = 0.8 + Math.random() * 0.4;
-    colors[i3] = colorMix.r * lum;
-    colors[i3 + 1] = colorMix.g * lum;
-    colors[i3 + 2] = colorMix.b * lum;
+    stars.push({ x, y, z, r: color.r, g: color.g, b: color.b, importance, isDust });
   }
+
+  // Sort by importance descending so Dee's LOD tier slices contain the brightest/most critical stars first
+  stars.sort((a, b) => b.importance - a.importance);
+
+  // 2. Define LOD Tiers (Tier 0: Full, Tier 1: Arms/Disk only, Tier 2: Sparse Sprite, Tier 3: Glow Dot)
+  const tierCounts = [
+    stars.length,
+    Math.floor(stars.length * 0.5),
+    Math.floor(stars.length * 0.15),
+    Math.floor(stars.length * 0.03)
+  ];
+
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(stars.length * 3);
+  const colors = new Float32Array(stars.length * 3);
+
+  stars.forEach((s, idx) => {
+    positions[idx * 3]     = s.x;
+    positions[idx * 3 + 1] = s.y;
+    positions[idx * 3 + 2] = s.z;
+
+    colors[idx * 3]     = s.r;
+    colors[idx * 3 + 1] = s.g;
+    colors[idx * 3 + 2] = s.b;
+  });
 
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
+  const particleTexture = createParticleTexture();
+
+  // Create shared material with fixed-pixel soft round sprites
   const material = new THREE.PointsMaterial({
-    size: 0.12,
-    sizeAttenuation: true,
+    size: 3.0,
+    sizeAttenuation: false,
     vertexColors: true,
+    map: particleTexture,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.9,
+    alphaTest: 0.05,
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
 
-  const mesh = new THREE.Points(geometry, material);
+  const pointsMesh = new THREE.Points(geometry, material);
 
-  return { geometry, material, mesh };
+  // Apply galaxy orientation (Inclination & Position Angle)
+  const incRad = THREE.MathUtils.degToRad(profile.inclinationDeg);
+  const paRad = THREE.MathUtils.degToRad(profile.positionAngleDeg);
+  pointsMesh.rotation.x = incRad;
+  pointsMesh.rotation.z = paRad;
+
+  container.add(pointsMesh);
+
+  // Initial tier set
+  geometry.setDrawRange(0, tierCounts[0]);
+
+  return {
+    container,
+    setLODTier(tier: number) {
+      const t = Math.max(0, Math.min(tier, tierCounts.length - 1));
+      geometry.setDrawRange(0, tierCounts[t]);
+      // Adjust point size/opacity subtly per tier for smooth LOD transitions
+      material.size = t === 3 ? 5.0 : 3.0;
+    },
+    dispose() {
+      geometry.dispose();
+      material.dispose();
+      particleTexture.dispose();
+      container.clear();
+    }
+  };
 }
-
