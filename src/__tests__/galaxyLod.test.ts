@@ -98,8 +98,8 @@ describe('speedForDistance', () => {
   const IAU_LY_M = 9.4607304725808e15;
 
   it('converts kilolight-years and megalight-years using the IAU light-year', () => {
-    expect(METERS.kly).toBeCloseTo(IAU_LY_M * 1e3, 0);
-    expect(METERS.mly).toBeCloseTo(IAU_LY_M * 1e6, 0);
+    expect(KLY).toBeCloseTo(IAU_LY_M * 1e3, 0);
+    expect(MLY).toBeCloseTo(IAU_LY_M * 1e6, 0);
   });
 });
 
