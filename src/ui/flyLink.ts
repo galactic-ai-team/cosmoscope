@@ -1,65 +1,102 @@
-// Search -> flyTo bridge (Lumi). Wires a search pick to Dee's FlyToController
-// using only the shape of its API, so this file builds before core/ lands.
-// Contract: ids are <kind>:<catalog>:<id> (e.g. galaxy:messier:M31), see docs/CONTRACTS.md.
+/**
+ * Search -> flyTo bridge (Lumi).
+ *
+ * Exoplanet hosts use exo:<encoded-hostname> IDs.
+ * They resolve through the exo ScaleLayer, while Dee's
+ * FlyToTarget receives the existing 'star' kind.
+ */
 
 export type TargetKind = 'planet' | 'star' | 'galaxy';
-/**
- * Id prefixes search can route. 'cluster' = galaxy clusters (Virgo, Coma, Fornax) from Nova's galaxies data.
- * 'cosmicweb' = Gemini's 2MRS cosmic-web galaxies (cosmicweb:2mrs:<n>, #48).
- */
-export type PickKind = TargetKind | 'cluster' | 'cosmicweb';
+export type PickKind =
+  | TargetKind
+  | 'cluster'
+  | 'cosmicweb'
+  | 'exo';
+
 export type Approach = 'orbit' | 'surface' | 'flyby';
 
-/** Structural match for Dee's FlyToController.flyTo (src/core/flyTo.ts). */
 export interface Flyer {
-  flyTo(t: { kind: TargetKind; id: string; approach: Approach }, now?: number): { promise: Promise<void>; cancel(): void };
+  flyTo(
+    t: {
+      kind: TargetKind;
+      id: string;
+      approach: Approach;
+    },
+    now?: number,
+  ): {
+    promise: Promise<void>;
+    cancel(): void;
+  };
 }
 
-const KINDS: readonly PickKind[] = ['planet', 'star', 'galaxy', 'cluster', 'cosmicweb'];
+const KINDS: readonly PickKind[] = [
+  'planet',
+  'star',
+  'galaxy',
+  'cluster',
+  'cosmicweb',
+  'exo',
+];
 
-/** Infer the pick kind from an id prefix, or null if the prefix is unknown. */
 export function kindFromId(id: string): PickKind | null {
   const idx = id.indexOf(':');
   if (idx <= 0) return null;
-  const k = id.slice(0, idx) as PickKind;
-  return KINDS.includes(k) ? k : null;
+
+  const kind = id.slice(0, idx) as PickKind;
+
+  return KINDS.includes(kind) ? kind : null;
 }
 
-/**
- * Map a pick kind to a kind Dee's FlyToTarget accepts. Dee's flyTo resolves
- * targets by id via registry.resolveTarget, so kind is informational only;
- * a galaxy cluster or a 2MRS cosmic-web galaxy flies like a galaxy (same extragalactic scale/frames).
- * TODO(Dee): if FlyToTarget.kind gains 'cluster', drop this mapping.
- */
-export function flightKind(k: PickKind): TargetKind {
-  return k === 'cluster' || k === 'cosmicweb' ? 'galaxy' : k;
+export function flightKind(kind: PickKind): TargetKind {
+  if (kind === 'cluster' || kind === 'cosmicweb') {
+    return 'galaxy';
+  }
+
+  if (kind === 'exo') {
+    return 'star';
+  }
+
+  return kind;
 }
 
-/**
- * Returns an onPick handler for mountSearch. Each pick cancels the flight in
- * progress, then calls onArrive(id) once the new flight resolves (used to show
- * the info panel only after arrival). Errors (unknown target) go to onError.
- */
 export function linkSearchToFlight(
   flyer: Flyer,
   onArrive: (id: string) => void,
-  onError: (id: string, err: unknown) => void = (id, err) => console.warn('flyTo failed', id, err),
-  /** Loop clock in seconds (main.ts owns the loop); keeps flights on the same time base as update(dt). */
-  now: () => number = () => performance.now() / 1000,
+  onError: (id: string, err: unknown) => void =
+    (id, err) => console.warn('flyTo failed', id, err),
+  now: () => number =
+    () => performance.now() / 1000,
 ): (id: string) => void {
   let current: { cancel(): void } | null = null;
   let seq = 0;
+
   return (id: string) => {
     const kind = kindFromId(id);
-    if (!kind) { onError(id, new Error(`No layer kind for id: ${id}`)); return; }
+
+    if (!kind) {
+      onError(id, new Error(`No layer kind for id: ${id}`));
+      return;
+    }
+
     current?.cancel();
-    // Tag this pick; only the latest pick's handlers fire.
+
     const mine = ++seq;
-    const h = flyer.flyTo({ kind: flightKind(kind), id, approach: 'orbit' }, now());
+
+    const h = flyer.flyTo({
+      kind: flightKind(kind),
+      id,
+      approach: 'orbit',
+    }, now());
+
     current = h;
+
     h.promise.then(
-      () => { if (mine === seq) onArrive(id); },
-      (err) => { if (mine === seq) onError(id, err); },
+      () => {
+        if (mine === seq) onArrive(id);
+      },
+      (err) => {
+        if (mine === seq) onError(id, err);
+      },
     );
   };
 }
