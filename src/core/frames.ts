@@ -26,6 +26,7 @@ export const METERS = {
   au: 1.495978707e11, // IAU 2012, exact
   pc: 3.0856775814913673e16,
   mpc: 3.0856775814913673e22,
+  ly: 9.4607304725808e15, // IAU light-year (Julian year x c), same value as ui/zone.ts and ui/search.ts
 } as const;
 
 /** Obliquity of the ecliptic at J2000 (radians), IAU 2006. */
