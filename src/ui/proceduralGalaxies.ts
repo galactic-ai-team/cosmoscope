@@ -19,12 +19,45 @@ import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import type { LodState } from '../core/lod';
 import { createProceduralGalaxy, type GeneratedGalaxy } from '../galaxies/generator';
 import { GALAXY_PROFILES, generatorParamsFor } from '../layers/galaxyProfiles';
+import { PROC_MIN_PX, proceduralFade, proceduralPointSize } from '../layers/galaxyBlend';
 
 interface Placed {
   id: string;
   galaxy: GeneratedGalaxy;
   posPc: Float64Array;
   diameterM: number;
+  /** Points materials + the opacity the generator gave them. */
+  mats: FadeMat[];
+}
+
+/**
+ * Lumi (P0): fade a generated galaxy in by apparent size and keep its
+ * fixed-pixel stars no bigger than the galaxy allows, so a small/far galaxy
+ * is the glow sprite only, never "glow + a clump of coloured dots".
+ * Call after setLODTier (which resets the generator's point size).
+ */
+export interface FadeMat {
+  mat: THREE.PointsMaterial;
+  /** Generator's opacity. */
+  opacity: number;
+  /** Generator's point size (re-read whenever setLODTier resets it). */
+  base: number;
+  /** Size we last wrote, to spot a reset. */
+  applied: number;
+}
+
+export function fadeMat(mat: THREE.PointsMaterial): FadeMat {
+  return { mat, opacity: mat.opacity, base: mat.size, applied: NaN };
+}
+
+export function applyProceduralFade(mats: FadeMat[], px: number): void {
+  const f = proceduralFade(px);
+  for (const m of mats) {
+    if (m.mat.size !== m.applied) m.base = m.mat.size; // generator changed it
+    m.mat.opacity = m.opacity * f;
+    m.mat.size = proceduralPointSize(m.base, px);
+    m.applied = m.mat.size;
+  }
 }
 
 /** Sky basis at a Sun-centred ICRS direction: X north, Y east, Z toward the Sun. */
@@ -90,11 +123,19 @@ export function createProceduralGalaxiesLayer(
       holder.traverse((o) => { o.frustumCulled = false; });
       group.add(holder);
       pointBudget += countGalaxyPoints(holder);
+      const mats: Placed['mats'] = [];
+      holder.traverse((o) => {
+        if (o instanceof THREE.Points && o.material instanceof THREE.PointsMaterial) {
+          mats.push(fadeMat(o.material));
+          o.material.transparent = true;
+        }
+      });
       placed.push({
         id,
         galaxy,
         posPc: Float64Array.from(target.worldPos as ArrayLike<number>),
         diameterM: params.diameterLy * METERS.ly,
+        mats,
       });
     }
   }
@@ -123,8 +164,12 @@ export function createProceduralGalaxiesLayer(
         c.scale.setScalar(s);
         const dist = camera.distanceTo({ frame, position: p.posPc });
         const px = (p.diameterM / Math.max(dist, 1)) / fovRad * viewportH;
-        c.visible = px > 2;
-        if (c.visible) p.galaxy.setLODTier(tierFor(dist, p.diameterM));
+        // Below PROC_MIN_PX the glow sprite alone stands for the galaxy.
+        c.visible = px > PROC_MIN_PX;
+        if (c.visible) {
+          p.galaxy.setLODTier(tierFor(dist, p.diameterM));
+          applyProceduralFade(p.mats, px);
+        }
       }
     },
     resolveTarget: () => null,
