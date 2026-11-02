@@ -94,11 +94,12 @@ describe('speedForDistance', () => {
     expect(secondsToCross1AU).toBeCloseTo(10, 0);
   });
 
-  it('KLY and MLY are internally consistent', () => {
-    expect(KLY).toBe(1_000 * 9.4607e15);
-    expect(MLY).toBe(1_000_000 * 9.4607e15);
-    // MLY / KLY = 1000
-    expect(MLY / KLY).toBeCloseTo(1000, 3);
+  // IAU value used in src/core/frames.ts METERS.ly. Keep in sync.
+  const IAU_LY_M = 9.4607304725808e15;
+
+  it('converts kilolight-years and megalight-years using the IAU light-year', () => {
+    expect(METERS.kly).toBeCloseTo(IAU_LY_M * 1e3, 0);
+    expect(METERS.mly).toBeCloseTo(IAU_LY_M * 1e6, 0);
   });
 });
 

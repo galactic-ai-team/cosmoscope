@@ -1,114 +1,110 @@
 // src/core/frameBudget.ts
-// Frame-budget reporter and adaptive quality downgrade for mobile perf.
-// Instrumented from the main loop; warns (dev) or drops a quality tier (prod)
-// when the rolling average frame time exceeds the platform's target.
+// Frame-time budget tracker. Emits an alarm when a configurable fraction of
+// the frames in a trailing window exceed the budget. Used to drive LOD tier
+// bias and (later) adaptive quality.
 //
-// Target is not always 16ms: iOS ProMotion is 120Hz = 8.33ms/frame; most
-// Android phones run at 60Hz = 16.67ms/frame. We detect via window.matchMedia
-// for reduced-motion / high-refresh signals, then fall back to a conservative
-// 16.67ms baseline for anything we can't identify.
+// Semantics:
+//   - Tracks frames in a ring buffer of `windowSize`.
+//   - Every frame, counts how many entries in the window are over budget.
+//   - If overCount / windowSize > threshold, fires onOverBudget.
+//   - Fires at most once per `cooldownFrames` frames to avoid alarm spam.
+//   - This is a *trailing window* count, not a consecutive-frame streak. A
+//     budget alarm should reflect "recent frames are slow", not "the last N
+//     frames were slow" — a single fast frame between two slow ones should not
+//     reset a real perf problem.
 
 export interface FrameBudgetOptions {
-  /** Rolling window for average. Default 60 frames (1 second at 60fps). */
+  /** Frame budget in milliseconds. Frames slower than this count as over. */
+  budgetMs: number;
+  /** Trailing window size in frames. Default 120 (~2s at 60fps). */
   windowSize?: number;
-  /** Override target frame time (ms). If unset, auto-detected. */
-  targetMs?: number;
-  /** Callback when the rolling average exceeds target by the downgrade threshold. */
-  onOverBudget?: (avgMs: number) => void;
-  /** Downgrade threshold as a multiplier of target. Default 1.35. */
-  downgradeThreshold?: number;
-  /** How many consecutive over-budget windows before we call onOverBudget. Default 3. */
-  consecutiveFrames?: number;
+  /** Fraction of the window that must be over budget to fire. Default 0.6. */
+  threshold?: number;
+  /** Minimum frames between alarms. Default 30. */
+  cooldownFrames?: number;
+  /** Called once per alarm. */
+  onOverBudget?: (overFraction: number) => void;
 }
 
-/**
- * Best-effort target frame time based on platform signals. Returns ms.
- */
-export function detectTargetFrameMs(): number {
-  if (typeof window === 'undefined') return 16.67;
-  // ProMotion / high-refresh displays.
-  const hiRefresh =
-    typeof window.matchMedia === 'function' &&
-    (window.matchMedia('(min-resolution: 2dppx)').matches ||
-      window.matchMedia('(update: fast)').matches);
-  // iOS Safari on recent devices is 120Hz. Android flagship phones are often
-  // 120Hz too. Default to 16.67 (60Hz) for everything else, including desktop
-  // where we don't know the refresh rate.
-  const isIOS =
-    typeof navigator !== 'undefined' &&
-    /iPad|iPhone|iPod/.test(navigator.userAgent);
-  if (hiRefresh && isIOS) return 8.33;
-  return 16.67;
-}
-
-/**
- * Read device memory (GB) if exposed. iOS Safari doesn't expose it, so
- * returns undefined there. Used to gate expensive shader features.
- */
-export function getDeviceMemoryGb(): number | undefined {
-  if (typeof navigator === 'undefined') return undefined;
-  const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
-  return typeof mem === 'number' ? mem : undefined;
-}
-
-/**
- * Frame budget tracker. Call `tick(dtMs)` once per frame from the main loop.
- * Returns a `dispose()` function. Emits `onOverBudget` after
- * `consecutiveFrames` over-budget windows in a row (avoids reacting to a
- * single GC pause).
- */
 export class FrameBudget {
-  private readonly targetMs: number;
-  private readonly windowSize: number;
-  private readonly downgradeThreshold: number;
-  private readonly consecutiveTarget: number;
-  private readonly onOverBudget?: (avgMs: number) => void;
+  readonly budgetMs: number;
+  readonly windowSize: number;
+  readonly threshold: number;
+  readonly cooldownFrames: number;
+  private onOverBudget?: (overFraction: number) => void;
 
-  private samples: number[] = [];
+  private ring: Float64Array;
+  private ringHead = 0;
+  private ringCount = 0;
   private overCount = 0;
 
-  constructor(opts: FrameBudgetOptions = {}) {
-    this.targetMs = opts.targetMs ?? detectTargetFrameMs();
-    this.windowSize = opts.windowSize ?? 60;
-    this.downgradeThreshold = opts.downgradeThreshold ?? 1.35;
-    this.consecutiveTarget = opts.consecutiveFrames ?? 3;
+  private framesSinceAlarm = 0;
+  private hasAlarmed = false;
+
+  constructor(opts: FrameBudgetOptions) {
+    this.budgetMs = opts.budgetMs;
+    this.windowSize = opts.windowSize ?? 120;
+    this.threshold = opts.threshold ?? 0.6;
+    this.cooldownFrames = opts.cooldownFrames ?? 30;
     this.onOverBudget = opts.onOverBudget;
+    this.ring = new Float64Array(this.windowSize);
   }
 
-  /** Feed one frame's duration in milliseconds. */
-  tick(dtMs: number): void {
-    this.samples.push(dtMs);
-    if (this.samples.length > this.windowSize) this.samples.shift();
+  /**
+   * Record a frame's duration in ms. Returns true if this call fired an alarm.
+   */
+  tick(frameMs: number): boolean {
+    const over = frameMs > this.budgetMs ? 1 : 0;
 
-    if (this.samples.length < this.windowSize) return;
-
-    let sum = 0;
-    for (const s of this.samples) sum += s;
-    const avg = sum / this.samples.length;
-
-    if (avg > this.targetMs * this.downgradeThreshold) {
-      this.overCount++;
-      if (this.overCount >= this.consecutiveTarget) {
-        this.onOverBudget?.(avg);
-        // Reset so we don't spam the downgrade callback every frame.
-        this.overCount = 0;
-        this.samples.length = 0;
-      }
+    // Evict the oldest entry if the ring is full.
+    if (this.ringCount === this.windowSize) {
+      const evicted = this.ring[this.ringHead];
+      if (evicted > this.budgetMs) this.overCount--;
     } else {
-      this.overCount = 0;
+      this.ringCount++;
     }
+
+    this.ring[this.ringHead] = frameMs;
+    this.ringHead = (this.ringHead + 1) % this.windowSize;
+    if (over) this.overCount++;
+
+    this.framesSinceAlarm++;
+
+    // Only consider alarms once the window is warm (or at least half-filled,
+    // so an early spike doesn't fire before we have data).
+    const warm = this.ringCount >= this.windowSize / 2;
+    const overFraction = this.ringCount > 0 ? this.overCount / this.ringCount : 0;
+    const alarmWanted = warm && overFraction > this.threshold;
+
+    const cooldownOk =
+      !this.hasAlarmed || this.framesSinceAlarm >= this.cooldownFrames;
+
+    if (alarmWanted && cooldownOk) {
+      this.framesSinceAlarm = 0;
+      this.hasAlarmed = true;
+      this.onOverBudget?.(overFraction);
+      return true;
+    }
+    return false;
   }
 
-  /** Current rolling average frame time. Useful for HUD/debug. */
-  averageMs(): number {
-    if (this.samples.length === 0) return 0;
-    let sum = 0;
-    for (const s of this.samples) sum += s;
-    return sum / this.samples.length;
+  /** Fraction of the current window that is over budget (0..1). */
+  get overFraction(): number {
+    return this.ringCount > 0 ? this.overCount / this.ringCount : 0;
   }
 
-  /** Target the tracker is measuring against. */
-  get target(): number {
-    return this.targetMs;
+  /** Number of frames currently tracked (0..windowSize). */
+  get trackedFrames(): number {
+    return this.ringCount;
+  }
+
+  /** Reset all state. Useful for tests and scene reloads. */
+  reset(): void {
+    this.ring.fill(0);
+    this.ringHead = 0;
+    this.ringCount = 0;
+    this.overCount = 0;
+    this.framesSinceAlarm = 0;
+    this.hasAlarmed = false;
   }
 }

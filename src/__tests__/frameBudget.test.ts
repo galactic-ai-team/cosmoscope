@@ -1,133 +1,134 @@
-// src/__tests__/frameBudget.test.ts
-// Unit tests for frameBudget.ts: target detection, rolling average, overage
-// callback. Uses explicit targetMs to avoid platform-dependent test flakiness.
+// src/__tests__/frameBudget.test.ts (full replacement)
+// Tests for FrameBudget. Semantics under test: trailing-window over-budget
+// count, not consecutive-frame streak; alarm fires once per cooldown window.
 
 import { describe, expect, it, vi } from 'vitest';
-import {
-  FrameBudget,
-  detectTargetFrameMs,
-  getDeviceMemoryGb,
-} from '../core/frameBudget';
+import { FrameBudget } from '../core/frameBudget';
 
-describe('detectTargetFrameMs', () => {
-  it('returns a positive number on the current platform', () => {
-    const ms = detectTargetFrameMs();
-    expect(ms).toBeGreaterThan(0);
-    // Sanity: should be one of the two well-known values in test envs.
-    expect([8.33, 16.67]).toContain(ms);
-  });
+const BUDGET = 16.7; // ~60 fps
 
-  it('returns 60Hz baseline on non-mobile test environments', () => {
-    // Vitest/jsdom does not report iPad/iPhone, so this should be 16.67.
-    expect(detectTargetFrameMs()).toBe(16.67);
-  });
-});
-
-describe('getDeviceMemoryGb', () => {
-  it('returns undefined when navigator.deviceMemory is absent', () => {
-    // Test envs don't expose deviceMemory; expect undefined.
-    expect(getDeviceMemoryGb()).toBeUndefined();
-  });
-});
-
-describe('FrameBudget', () => {
-  it('does not call onOverBudget before window is full', () => {
-    const onOver = vi.fn();
-    const fb = new FrameBudget({ targetMs: 16, windowSize: 10, onOverBudget: onOver });
-    for (let i = 0; i < 5; i++) fb.tick(30); // half the window
-    expect(onOver).not.toHaveBeenCalled();
-  });
-
-  it('does not call onOverBudget for over-budget windows below threshold', () => {
-    const onOver = vi.fn();
+describe('FrameBudget — trailing window semantics', () => {
+  it('counts every over-budget frame in the window, not just consecutive', () => {
+    const alarms: number[] = [];
     const fb = new FrameBudget({
-      targetMs: 16,
+      budgetMs: BUDGET,
       windowSize: 10,
-      consecutiveFrames: 2,
-      downgradeThreshold: 1.5,
-      onOverBudget: onOver,
+      threshold: 0.6,
+      cooldownFrames: 100, // suppress second alarm for this test
+      onOverBudget: (f) => alarms.push(f),
     });
-    // 20ms average = 1.25× target, below 1.5× threshold.
-    for (let i = 0; i < 30; i++) fb.tick(20);
-    expect(onOver).not.toHaveBeenCalled();
-  });
 
-  it('calls onOverBudget after N consecutive over-budget windows', () => {
-    const onOver = vi.fn();
-    const fb = new FrameBudget({
-      targetMs: 16,
-      windowSize: 10,
-      consecutiveFrames: 2,
-      downgradeThreshold: 1.3,
-      onOverBudget: onOver,
-    });
-    // 30ms average = 1.875× target, well over 1.3× threshold.
-    // Window size 10, need 2 consecutive windows = 20 ticks.
-    for (let i = 0; i < 19; i++) fb.tick(30);
-    expect(onOver).not.toHaveBeenCalled();
-    fb.tick(30); // 20th tick completes second over-budget window
-    expect(onOver).toHaveBeenCalledTimes(1);
-  });
+    // Warm the window with fast frames.
+    for (let i = 0; i < 5; i++) fb.tick(5);
 
-  it('resets the over-budget counter when a window is on-budget', () => {
-    const onOver = vi.fn();
-    const fb = new FrameBudget({
-      targetMs: 16,
-      windowSize: 10,
-      consecutiveFrames: 2,
-      downgradeThreshold: 1.3,
-      onOverBudget: onOver,
-    });
-    // One over-budget window (10 ticks at 30ms), then one on-budget (10 at 10ms).
-    for (let i = 0; i < 10; i++) fb.tick(30);
-    for (let i = 0; i < 10; i++) fb.tick(10);
-    // Now one over-budget window again.
-    for (let i = 0; i < 10; i++) fb.tick(30);
-    // Counter should have reset on the on-budget window, so we're only at 1
-    // consecutive over-budget window — not enough to fire.
-    expect(onOver).not.toHaveBeenCalled();
-  });
+    // 4 over-budget frames interleaved with fast ones — no *consecutive* streak
+    // longer than 2, but 4/10 in the window = 40%. Under threshold.
+    fb.tick(30); // over
+    fb.tick(5);  // fast
+    fb.tick(30); // over
+    fb.tick(5);  // fast
+    fb.tick(30); // over
+    fb.tick(5);  // fast
+    fb.tick(30); // over
+    fb.tick(5);  // fast
 
-  it('resets its sample buffer after firing onOverBudget', () => {
-    const onOver = vi.fn();
-    const fb = new FrameBudget({
-      targetMs: 16,
-      windowSize: 10,
-      consecutiveFrames: 1,
-      downgradeThreshold: 1.3,
-      onOverBudget: onOver,
-    });
-    for (let i = 0; i < 10; i++) fb.tick(30); // one over-budget window
-    expect(onOver).toHaveBeenCalledTimes(1);
-    // After firing, samples are cleared, so average is 0 until we tick again.
-    expect(fb.averageMs()).toBe(0);
-  });
+    // Window now has 4/10 over = 40%, under 60%. No alarm.
+    expect(alarms.length).toBe(0);
+    expect(fb.overFraction).toBeCloseTo(0.4, 5);
 
-  it('averageMs reflects the rolling window', () => {
-    const fb = new FrameBudget({ targetMs: 16, windowSize: 4 });
-    fb.tick(10);
-    fb.tick(20);
-    fb.tick(10);
-    fb.tick(20);
-    // Average should be (10+20+10+20)/4 = 15.
-    expect(fb.averageMs()).toBeCloseTo(15, 6);
-  });
-
-  it('target reflects the configured value', () => {
-    const fb = new FrameBudget({ targetMs: 8.33 });
-    expect(fb.target).toBe(8.33);
-  });
-
-  it('window size 1 fires after a single over-budget frame', () => {
-    const onOver = vi.fn();
-    const fb = new FrameBudget({
-      targetMs: 16,
-      windowSize: 1,
-      consecutiveFrames: 1,
-      downgradeThreshold: 1.3,
-      onOverBudget: onOver,
-    });
+    // Two more over-budget frames push to 6/10 = 60%, still not > threshold.
     fb.tick(30);
-    expect(onOver).toHaveBeenCalledTimes(1);
+    fb.tick(30);
+    expect(alarms.length).toBe(0);
+
+    // One more over → 7/10 = 70% > 60%. Alarm fires.
+    fb.tick(30);
+    expect(alarms.length).toBe(1);
+    expect(alarms[0]).toBeGreaterThan(0.6);
+  });
+
+  it('does NOT reset the count when a fast frame breaks a streak', () => {
+    const alarms: number[] = [];
+    const fb = new FrameBudget({
+      budgetMs: BUDGET,
+      windowSize: 6,
+      threshold: 0.5,
+      cooldownFrames: 100,
+      onOverBudget: (f) => alarms.push(f),
+    });
+
+    // 3 over, 1 fast, 2 over — 5/6 = 83% over. A consecutive-only tracker
+    // would have counted 2, not 5.
+    fb.tick(30);
+    fb.tick(30);
+    fb.tick(30);
+    fb.tick(5);
+    fb.tick(30);
+    fb.tick(30);
+
+    expect(fb.overFraction).toBeCloseTo(5 / 6, 5);
+    expect(alarms.length).toBe(1);
+  });
+
+  it('evicts old frames as the window slides', () => {
+    const fb = new FrameBudget({
+      budgetMs: BUDGET,
+      windowSize: 4,
+      threshold: 0.5,
+      cooldownFrames: 100,
+    });
+
+    // Fill window with over-budget frames.
+    for (let i = 0; i < 4; i++) fb.tick(30);
+    expect(fb.overFraction).toBe(1);
+
+    // Push 4 fast frames — should evict all 4 over-budget entries.
+    for (let i = 0; i < 4; i++) fb.tick(5);
+    expect(fb.overFraction).toBe(0);
+  });
+
+  it('fires at most once per cooldown period', () => {
+    const onOverBudget = vi.fn();
+    const fb = new FrameBudget({
+      budgetMs: BUDGET,
+      windowSize: 4,
+      threshold: 0.5,
+      cooldownFrames: 5,
+      onOverBudget,
+    });
+
+    // 4 over → alarm on 4th frame (window warm).
+    for (let i = 0; i < 4; i++) fb.tick(30);
+    expect(onOverBudget).toHaveBeenCalledTimes(1);
+
+    // Next 4 frames also over, but cooldown blocks the alarm.
+    for (let i = 0; i < 4; i++) fb.tick(30);
+    expect(onOverBudget).toHaveBeenCalledTimes(1);
+
+    // 5th frame after alarm — cooldown expired, alarm fires again.
+    fb.tick(30);
+    expect(onOverBudget).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the window to warm before alarming', () => {
+    const onOverBudget = vi.fn();
+    const fb = new FrameBudget({
+      budgetMs: BUDGET,
+      windowSize: 10,
+      threshold: 0.5,
+      cooldownFrames: 0,
+      onOverBudget,
+    });
+
+    // First 4 frames over budget. Warm threshold is windowSize/2 = 5, so no
+    // alarm yet even though fraction is 100%.
+    for (let i = 0; i < 4; i++) {
+      fb.tick(30);
+      expect(onOverBudget).not.toHaveBeenCalled();
+    }
+
+    // 5th frame warms the window — alarm fires.
+    fb.tick(30);
+    expect(onOverBudget).toHaveBeenCalledTimes(1);
   });
 });
