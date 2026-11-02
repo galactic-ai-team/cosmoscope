@@ -8,7 +8,7 @@
 // Loop clock: seconds, dt clamped to 0.1 s (Claude's spec), shared with flyTo.
 import * as THREE from 'three';
 
-import { register } from './catalog';
+import { get as getCatalogEntry, register } from './catalog';
 import { CosmoCamera, RENDERER_OPTIONS } from './core/camera';
 import { FrameStack, type FrameId } from './core/frames';
 import { FlyToController, type FlyToTarget, type FlyToHandle } from './core/flyTo';
@@ -37,6 +37,7 @@ import { mountHomeKey } from './ui/home';
 import { orbitUpFor } from './ui/orbitUp';
 import { chooseFrame } from './core/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
+import { targetReadout, type ReadoutDeps } from './ui/targetReadout';
 import { MAX_VIEW_DISTANCE_M } from './ui/viewLimits';
 import { createStarGlow } from './ui/starGlow';
 import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
@@ -319,6 +320,12 @@ addEventListener('resize', () => {
 
 // ---- render loop (main.ts owns it) --------------------------------------------
 const scaleEl = document.querySelector<HTMLElement>('#scale');
+const readoutDeps: ReadoutDeps = {
+  resolve: (id) => registry.resolveTarget(id),
+  distanceTo: (p) => camera.distanceTo(p),
+  nameOf: (id) => getCatalogEntry(id)?.name,
+  format: formatDistance,
+};
 const hudTarget = new Float64Array(3);
 const zoneHud = makeZoneHud(document.querySelector<HTMLElement>('#zone'));
 const SUN_POINT = { frame: 'galactic' as FrameId, position: SUN };
@@ -342,8 +349,11 @@ renderer.setAnimationLoop((ms: number) => {
   registry.update(dt);  // Dee: crossfades + per-layer update (camera-relative positions)
 
   if (scaleEl) {
-    const tgt = camera.getTarget(hudTarget);
-    scaleEl.textContent = tgt ? `Distance to target: ${formatDistance(camera.distanceTo(tgt))}` : '';
+    // Claude: always the distance to the object you picked last, named. The
+    // camera's look-at point is only the picked object in orbit mode; in
+    // free-fly it's a point ahead at the nearest body's distance.
+    const text = targetReadout(lastPickId, readoutDeps);
+    if (scaleEl.textContent !== text) scaleEl.textContent = text;
   }
   zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
   walkOnEarth.update(); // Lumi: Earth handoff button / auto-trigger
