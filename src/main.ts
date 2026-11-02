@@ -20,6 +20,13 @@ import { createCosmicWebLayer } from './layers/cosmicWebLayer';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
+import {
+  loadExoplanetSystems,
+} from './layers/exoplanets/catalog';
+
+import {
+  makeExoplanetSystemsLayer,
+} from './layers/exoplanets';
 import { makeZoneHud } from './ui/zone';
 import { linkSearchToFlight, kindFromId, flightKind, type Flyer } from './ui/flyLink';
 import { createTour } from './ui/tour';
@@ -31,6 +38,8 @@ import { chooseFrame } from './core/frameSwitch';
 import { formatDistance, mountSearch, showInfoById } from './ui/search';
 import { MAX_VIEW_DISTANCE_M } from './ui/viewLimits';
 import { createStarGlow } from './ui/starGlow';
+import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
+import { mountWalkOnEarth, type EarthSample } from './ui/walkOnEarth';
 
 const MAX_DT = 0.1;
 const HYG_URL = '/data/hyg-v41.json';
@@ -103,6 +112,28 @@ const starsReady = stars.load(HYG_URL)
   .catch((err) => console.warn(`stars: HYG data unavailable (${HYG_URL}), running without the star field`, err))
   .finally(() => registry.register(stars));
 
+// GPT-6 — static NASA exoplanet systems.
+// The deployed app loads only its own checked-in JSON.
+// Register the ScaleLayer after catalog validation succeeds.
+const exoplanets = makeExoplanetSystemsLayer(
+  scene,
+  camera,
+);
+
+const exoplanetsReady = loadExoplanetSystems()
+  .then((count) => {
+    registry.register(exoplanets);
+    console.info(
+      `exoplanets: ${count} confirmed host systems loaded`,
+    );
+  })
+  .catch((error: unknown) => {
+    console.warn(
+      'exoplanets: static catalog unavailable',
+      error,
+    );
+  });
+
 // ---- flyTo + search (Lumi's bridge, Dee's controller) -------------------------
 const flight = new FlyToController(camera, registry);
 let now = performance.now() / 1000; // loop clock, seconds
@@ -124,14 +155,28 @@ const flyer: Flyer = {
       controls.setUp(orbitUpFor(r.frameId));
       controls.setMinDistance(r.radius ? 1.05 * r.radius * camera.unitsPerFrame(r.frameId) : 0);
     }
-    starGlow.setFocus(r && t.id.startsWith('star:') ? { frame: r.frameId, position: r.worldPos } : null);
+    starGlow.setFocus(
+      r && (
+        t.id.startsWith('star:') ||
+        t.id.startsWith('exo:')
+      )
+        ? { frame: r.frameId, position: r.worldPos }
+        : null,
+    );
+    // The exoplanet layer renders only the currently selected host.
+    exoplanets.setFocus(
+      t.id.startsWith('exo:') ? t.id : null,
+    );
     currentFlight = flight.flyTo(t, at ?? now);
     return currentFlight;
   },
 };
 const flyToPick = linkSearchToFlight(flyer, showInfoById, undefined, () => now);
 // Deep links (#to=<id>): fly there once stars have loaded; each pick updates the URL.
-const recordPick = linkDeepLinks(flyToPick, starsReady);
+const recordPick = linkDeepLinks(
+  flyToPick,
+  Promise.all([starsReady, exoplanetsReady]),
+);
 // Grand Tour (Lumi): button flies outward through the scales; any manual pick stops it.
 const tourBtn = document.querySelector<HTMLButtonElement>('#tour');
 const tour = createTour({
@@ -178,6 +223,32 @@ controls.onUserInput(() => {
   currentFlight = null;
 });
 
+// ---- Earth handoff (Lumi): near Earth, "Walk on Earth" fades into earth-walker ----
+// Distances are in Earth's rendered radius; geography maths in src/ui/earthHandoff.ts.
+const earthCam = new Float64Array(3);
+const earthRel = new Float64Array(3);
+const earthSun = new Float64Array(3);
+const earthUp = new Float64Array(3);
+const walkOnEarth = mountWalkOnEarth({
+  canvas: renderer.domElement,
+  reducedMotion,
+  flightActive: () => flight.active, // hide/disarm while a flyTo passes Earth
+  sample(): EarthSample | null {
+    const r = registry.resolveTarget(EARTH_ID);
+    if (!r || !r.radius) return null;
+    camera.getCameraWorldPosition(r.frameId, earthCam);
+    for (let i = 0; i < 3; i++) {
+      earthRel[i] = earthCam[i] - r.worldPos[i];
+      earthSun[i] = -r.worldPos[i]; // Sun = helio origin
+    }
+    const distanceR = Math.hypot(earthRel[0], earthRel[1], earthRel[2]) / r.radius;
+    return {
+      distanceR,
+      spot: () => spotUnderCamera(earthRel, camera.getCameraUp(earthUp), r.frameId === 'helio' ? earthSun : null, Date.now()),
+    };
+  },
+});
+
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
   camera.three.aspect = innerWidth / innerHeight;
@@ -212,6 +283,7 @@ renderer.setAnimationLoop((ms: number) => {
     scaleEl.textContent = tgt ? `Distance to target: ${formatDistance(camera.distanceTo(tgt))}` : '';
   }
   zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
+  walkOnEarth.update(); // Lumi: Earth handoff button / auto-trigger
   renderer.render(scene, camera.three);
 });
 
