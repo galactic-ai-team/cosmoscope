@@ -90,7 +90,9 @@ export function chooseRenderScale(distanceMeters: number, current: number): numb
   const d = Math.max(distanceMeters, MIN_RENDER_SCALE);
   const ratio = d / current;
   if (ratio >= 0.5 && ratio <= 20) return current;
-  return Math.max(MIN_RENDER_SCALE, 10 ** Math.floor(Math.log10(d)));
+  // Number('1e<n>') is always the correctly rounded power of ten; 10 ** n is
+  // not guaranteed to be (newer V8 in Node 24 gives 1.0000000000000001e+23).
+  return Math.max(MIN_RENDER_SCALE, Number(`1e${Math.floor(Math.log10(d))}`));
 }
 
 export class CosmoCamera implements FrameApi {
