@@ -47,6 +47,22 @@ export function tierFor(distanceM: number, diameterM: number): number {
   return 3;
 }
 
+/**
+ * Star + dust points a generated galaxy actually holds at tier 0: each
+ * Points' draw range (stars start at tierCounts[0]) capped by its buffer.
+ */
+export function countGalaxyPoints(root: THREE.Object3D): number {
+  let total = 0;
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Points)) return;
+    const g = o.geometry as THREE.BufferGeometry;
+    const pos = g.getAttribute('position');
+    if (!pos) return;
+    total += Math.min(pos.count, g.drawRange.count);
+  });
+  return total;
+}
+
 export function createProceduralGalaxiesLayer(
   scene: THREE.Scene,
   camera: CosmoCamera,
@@ -56,6 +72,9 @@ export function createProceduralGalaxiesLayer(
   group.name = 'procedural-galaxies';
   const placed: Placed[] = [];
   let built = false;
+  // Real point count (stars after the tier-0 count + dust), set in build()
+  // so FrameBudget sees an honest renderBudget (Nova's #65 review).
+  let pointBudget = 0;
 
   function build(): void {
     built = true;
@@ -70,6 +89,7 @@ export function createProceduralGalaxiesLayer(
       holder.frustumCulled = false;
       holder.traverse((o) => { o.frustumCulled = false; });
       group.add(holder);
+      pointBudget += countGalaxyPoints(holder);
       placed.push({
         id,
         galaxy,
@@ -83,7 +103,9 @@ export function createProceduralGalaxiesLayer(
   return {
     idPrefix: 'galaxy-mesh',
     frames: ['galactic', 'cosmic'],
-    renderBudget: 0,
+    get renderBudget(): number {
+      return pointBudget;
+    },
     enter(_api: FrameApi): void {
       if (!built) build();
       scene.add(group);
