@@ -17,6 +17,7 @@ import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
 import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
 import { createCosmicWebLayer } from './layers/cosmicWebLayer';
+import { createProceduralGalaxiesLayer } from './ui/proceduralGalaxies';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
 import { makeStarsLayer } from './layers/stars';
 import { linkDeepLinks } from './ui/deepLink';
@@ -40,6 +41,8 @@ import { MAX_VIEW_DISTANCE_M } from './ui/viewLimits';
 import { createStarGlow } from './ui/starGlow';
 import { EARTH_ID, spotUnderCamera } from './ui/earthHandoff';
 import { mountWalkOnEarth, type EarthSample } from './ui/walkOnEarth';
+import { CosmoFlyControls } from './core/flyControls';
+import { FLY_BODY_IDS, createFlyIntoEarthTrigger, freeFlySpeedForDistance, mountFreeFlyUi, pickNearestBody, type BodyCandidate } from './ui/freeFly';
 
 const MAX_DT = 0.1;
 const HYG_URL = '/data/hyg-v41.json';
@@ -87,7 +90,10 @@ function adaptStub(stub: StubLayer, extraFrames: FrameId[] = []): ScaleLayer {
 }
 
 // Nova's galaxies layer implements ScaleLayer directly (createGalaxiesLayer + clustersRoute).
-registry.register(createGalaxiesLayer(scene, camera));
+const galaxiesLayer = createGalaxiesLayer(scene, camera);
+registry.register(galaxiesLayer);
+// Lumi glue: Gemini's procedural galaxies for Nova's profiled galaxies.
+registry.register(createProceduralGalaxiesLayer(scene, camera, (id) => galaxiesLayer.resolveTarget(id)));
 registry.register(clustersRoute);
 registry.register(new SolarSystemLayer(scene, camera));
 registry.register(adaptStub(createStubOrbitLayer(), ['galactic']));
@@ -139,11 +145,16 @@ const flight = new FlyToController(camera, registry);
 let now = performance.now() / 1000; // loop clock, seconds
 
 let currentFlight: FlyToHandle | null = null;
+/** Last flyTo target id; free-fly speed also scales against it (a star or galaxy). */
+let lastPickId: string | null = null;
 // v1.1 (Lumi): star targets get a visible disc + glow (the point field has no Sun and fixed-size points).
 const starGlow = createStarGlow(scene, camera);
 /** Point the camera at the target as the flight starts (flyTo moves position only). */
 const flyer: Flyer = {
   flyTo(t: FlyToTarget, at?: number) {
+    // A flight always ends free-fly (Claude's checklist).
+    if (fly.enabled) { fly.stop(); freeFlyUi.sync(); }
+    lastPickId = t.id;
     const r = registry.resolveTarget(t.id);
     if (r) {
       camera.setPose({
@@ -229,25 +240,69 @@ const earthCam = new Float64Array(3);
 const earthRel = new Float64Array(3);
 const earthSun = new Float64Array(3);
 const earthUp = new Float64Array(3);
+function earthSample(): EarthSample | null {
+  const r = registry.resolveTarget(EARTH_ID);
+  if (!r || !r.radius) return null;
+  camera.getCameraWorldPosition(r.frameId, earthCam);
+  for (let i = 0; i < 3; i++) {
+    earthRel[i] = earthCam[i] - r.worldPos[i];
+    earthSun[i] = -r.worldPos[i]; // Sun = helio origin
+  }
+  const distanceR = Math.hypot(earthRel[0], earthRel[1], earthRel[2]) / r.radius;
+  return {
+    distanceR,
+    spot: () => spotUnderCamera(earthRel, camera.getCameraUp(earthUp), r.frameId === 'helio' ? earthSun : null, Date.now()),
+  };
+}
 const walkOnEarth = mountWalkOnEarth({
   canvas: renderer.domElement,
   reducedMotion,
   flightActive: () => flight.active, // hide/disarm while a flyTo passes Earth
-  sample(): EarthSample | null {
-    const r = registry.resolveTarget(EARTH_ID);
-    if (!r || !r.radius) return null;
-    camera.getCameraWorldPosition(r.frameId, earthCam);
-    for (let i = 0; i < 3; i++) {
-      earthRel[i] = earthCam[i] - r.worldPos[i];
-      earthSun[i] = -r.worldPos[i]; // Sun = helio origin
+  autoTriggerDisabled: () => fly.enabled, // free-fly: wheel = speed, not zoom
+  sample: earthSample,
+});
+
+// ---- free-fly (Claude's CosmoFlyControls; Lumi's wiring + UI in src/ui/freeFly.ts) ----
+// Speed scales with the distance to the nearest SURFACE among the Sun, the
+// planets (their rendered, enlarged spheres) and the last picked target.
+const flyCands: BodyCandidate[] = [];
+const fly = new CosmoFlyControls(camera, {
+  reducedMotion,
+  speedForDistance: freeFlySpeedForDistance, // full gap per second (Claude's default is half)
+  nearestBody() {
+    flyCands.length = 0;
+    const ids = lastPickId && !FLY_BODY_IDS.includes(lastPickId) ? [...FLY_BODY_IDS, lastPickId] : FLY_BODY_IDS;
+    for (const id of ids) {
+      const r = registry.resolveTarget(id);
+      if (!r) continue;
+      flyCands.push({
+        point: { frame: r.frameId, position: r.worldPos },
+        radius: r.radius ? r.radius * camera.unitsPerFrame(r.frameId) : 0,
+      });
     }
-    const distanceR = Math.hypot(earthRel[0], earthRel[1], earthRel[2]) / r.radius;
-    return {
-      distanceR,
-      spot: () => spotUnderCamera(earthRel, camera.getCameraUp(earthUp), r.frameId === 'helio' ? earthSun : null, Date.now()),
-    };
+    return pickNearestBody(flyCands, (p) => camera.distanceTo(p));
   },
 });
+fly.attach(renderer.domElement);
+fly.onUserInput(() => tour.stop());
+const freeFlyUi = mountFreeFlyUi({
+  fly,
+  toggle() {
+    if (fly.enabled) {
+      fly.stop();
+      controls.setMinDistance(0); // the orbit target is now just a point ahead
+      return;
+    }
+    // Free-fly cancels any flight and the tour, then keeps the current view.
+    tour.stop();
+    currentFlight?.cancel();
+    flight.cancelFlight();
+    currentFlight = null;
+    starGlow.setFocus(null);
+    fly.start();
+  },
+});
+const flyIntoEarth = createFlyIntoEarthTrigger();
 
 // ---- resize -----------------------------------------------------------------
 addEventListener('resize', () => {
@@ -268,10 +323,12 @@ renderer.setAnimationLoop((ms: number) => {
   last = now;
 
   flight.update(now);   // Dee: moves the camera along the log-space path
-  controls.enabled = !flight.active; // Claude: controls stand down mid-flight
+  controls.enabled = !flight.active && !fly.enabled; // Claude: controls stand down mid-flight and in free-fly
   controls.update(dt);  // Claude: eased orbit/zoom around the target
+  fly.update(dt);       // Claude: free-fly (no-op unless enabled)
   if (!flight.active) {  // Lumi: helio <-> galactic <-> cosmic by distance from the Sun (exact rebase)
-    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT), camera.getTarget(hudTarget)?.frame ?? null);
+    const hint = fly.enabled ? fly.frameHint() : camera.getTarget(hudTarget)?.frame ?? null;
+    const want = chooseFrame(camera.getFrameId(), camera.distanceTo(SUN_POINT), hint);
     if (want !== camera.getFrameId()) camera.rebaseTo(want); // orbit axis stays the target's
   }
   camera.update();      // Claude: sync the three.js puppet before layers read it
@@ -284,6 +341,7 @@ renderer.setAnimationLoop((ms: number) => {
   }
   zoneHud(camera.distanceTo(SUN_POINT)); // Lumi: 'where am I' label
   walkOnEarth.update(); // Lumi: Earth handoff button / auto-trigger
+  if (fly.enabled && flyIntoEarth.update(earthSample()?.distanceR ?? Infinity, true)) walkOnEarth.go(); // Lumi: free-fly into Earth
   renderer.render(scene, camera.three);
 });
 

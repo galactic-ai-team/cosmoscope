@@ -21,6 +21,7 @@ import * as THREE from 'three';
 import type { FrameApi, CosmoCamera } from '../core/camera';
 import type { ResolvedTarget, ScaleLayer } from '../core/layers';
 import { register, type CatalogEntry } from '../catalog';
+import { GALAXY_PROFILES } from './galaxyProfiles';
 
 const LY_M = 9.4607e15; // metres per light-year (catalog distanceM only)
 const MLY_M = LY_M * 1e6; // metres per million light-years
@@ -310,6 +311,9 @@ export function createGalaxiesLayer(
   camera: CosmoCamera,
 ): ScaleLayer {
   const n = BODIES.length;
+  // Galaxies with a verified profile (galaxyProfiles.ts) get a procedural
+  // mesh from PR #65 up close; their glow sprite tapers to a halo there.
+  const isProfiled = BODIES.map((b) => b.id in GALAXY_PROFILES);
   const positions = new Float32Array(n * 3); // camera-relative, refilled in update()
   const colors = new Float32Array(n * 3);
   BODIES.forEach((b, i) => {
@@ -397,7 +401,17 @@ export function createGalaxiesLayer(
         scratch[2] = positionsPc[i * 3 + 2];
         camera.toCameraRelative(scratch, 'galactic', tmpVec);
         attr.setXYZ(i, tmpVec.x, tmpVec.y, tmpVec.z);
-        sizeAttr.setX(i, diametersPc[i] * scale);
+        let size = diametersPc[i] * scale;
+        if (isProfiled[i] && diametersPc[i] > 0) {
+          // k = camera distance in galaxy diameters (tmpVec is render
+          // units; scale is render units per parsec). Full glow beyond
+          // 10 diameters, 30% halo inside 3, linear between — so the
+          // sprite and the procedural mesh crossfade instead of stacking.
+          const k = tmpVec.length() / scale / diametersPc[i];
+          const halo = k >= 10 ? 1 : k <= 3 ? 0.3 : 0.3 + (0.7 * (k - 3)) / 7;
+          size *= halo;
+        }
+        sizeAttr.setX(i, size);
       }
       attr.needsUpdate = true;
       sizeAttr.needsUpdate = true;

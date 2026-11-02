@@ -10,6 +10,9 @@
 // - Flights: while a flyTo is in progress (flightActive()) the button is hidden
 //   and the auto-trigger is disarmed, so a flight that passes Earth on its way
 //   elsewhere never flashes the button or fires (Claude's #59 review).
+// - Free-fly (autoTriggerDisabled()): the button still shows, but wheel/pinch
+//   no longer mean zoom, so the zoom-intent auto-trigger is off; free-fly has
+//   its own fly-into-Earth trigger (./freeFly.ts).
 // - +/- keys typed into the search box (or any input/textarea/select/
 //   contenteditable) are ignored.
 // - Fade: ~0.9 s to black (0.15 s with reduced motion), then navigate. Esc or a
@@ -38,6 +41,8 @@ export interface WalkOnEarthDeps {
   sample(): EarthSample | null;
   /** True while a flyTo flight is moving the camera (hide button, no auto-fire). */
   flightActive?(): boolean;
+  /** True while zoom-intent auto-fire should stay off but the button may show (free-fly: wheel = speed). */
+  autoTriggerDisabled?(): boolean;
   reducedMotion?: boolean;
   navigate?: (url: string) => void;
   doc?: Document;
@@ -163,7 +168,7 @@ export function mountWalkOnEarth(deps: WalkOnEarthDeps): { update(): void; go():
       const s = deps.sample();
       const r = trigger.update(s ? s.distanceR : Infinity);
       // Mid-flight: no button, and no zoom-in carried over into the arrival.
-      if (flying) trigger.reset();
+      if (flying || deps.autoTriggerDisabled?.() === true) trigger.reset();
       const show = r.showButton && timer === null && !flying;
       if (btn.hidden === show) btn.hidden = !show;
       if (show && s) {
