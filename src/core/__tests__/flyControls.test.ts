@@ -242,6 +242,19 @@ describe('free-fly: DOM binding', () => {
     expect(cam.getCameraForward()[0]).toBeGreaterThan(0.1);
   });
 
+  it('stop() releases a pointer lock taken for mouse look', () => {
+    const { fly } = rig('helio', [1, 0, 0]);
+    const { doc, el } = dom();
+    const exitPointerLock = vi.fn(() => {
+      doc.pointerLockElement = null;
+    });
+    Object.assign(doc, { exitPointerLock });
+    fly.attach(el);
+    doc.pointerLockElement = el;
+    fly.stop();
+    expect(exitPointerLock).toHaveBeenCalledTimes(1);
+  });
+
   it('touch: left half is a move stick, right half looks', () => {
     const { cam, fly } = rig('helio', [1, 0, 0]);
     const { el } = dom();

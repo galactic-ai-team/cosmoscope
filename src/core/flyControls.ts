@@ -118,6 +118,7 @@ export class CosmoFlyControls {
   private readonly opts: Required<Omit<FlyOptions, 'nearestBody'>> & Pick<FlyOptions, 'nearestBody'>;
   private readonly inputListeners = new Set<() => void>();
   private detach: (() => void) | null = null;
+  private releasePointer: (() => void) | null = null;
   private lastNearest: NearestBody | null = null;
 
   // Scratch (no allocation in update()).
@@ -162,10 +163,15 @@ export class CosmoFlyControls {
     this.lookX = this.lookY = this.stickX = this.stickY = 0;
   }
 
-  /** Leave free-fly. The camera stays where it is, looking where it was looking. */
+  /**
+   * Leave free-fly. The camera stays where it is, looking where it was
+   * looking, and a pointer lock we took is released (otherwise the orbit
+   * controls would get a hidden, locked mouse).
+   */
   stop(): void {
     if (!this.active) return;
     this.active = false;
+    this.releasePointer?.();
     this.vel.fill(0);
     this.keys.clear();
     this.lookX = this.lookY = this.stickX = this.stickY = 0;
@@ -365,6 +371,9 @@ export class CosmoFlyControls {
     const width = (): number => el.getBoundingClientRect?.().width ?? el.clientWidth ?? 0;
     const left = (): number => el.getBoundingClientRect?.().left ?? 0;
     const locked = (): boolean => !!doc && doc.pointerLockElement === el;
+    this.releasePointer = (): void => {
+      if (locked()) doc?.exitPointerLock?.();
+    };
 
     const onKeyDown = (e: KeyboardEvent): void => {
       // No defaultPrevented check on purpose: the orbit controls (disabled while
@@ -443,7 +452,10 @@ export class CosmoFlyControls {
       el.removeEventListener('pointercancel', onUp);
       el.removeEventListener('wheel', onWheel);
       pointers.clear();
-      if (this.detach === detach) this.detach = null;
+      if (this.detach === detach) {
+        this.detach = null;
+        this.releasePointer = null;
+      }
     };
     this.detach = detach;
     return detach;
