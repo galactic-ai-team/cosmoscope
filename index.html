@@ -79,6 +79,27 @@
     bottom: calc(16px + env(safe-area-inset-bottom));
   }
 }
+/* Lumi follow-up to GPT-6's mobile HUD: keep the info panel off the bottom button row */
+#info{bottom:60px;max-height:calc(100vh - 140px);overflow-y:auto;box-sizing:border-box}
+@media (max-width: 480px) {
+  #info {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    bottom: calc(60px + env(safe-area-inset-bottom));
+    max-height: 30vh;
+  }
+  /* distance readout moves up under the search box, Walk on Earth below it */
+  #scale {
+    top: calc(max(12px, env(safe-area-inset-top)) + 124px);
+    bottom: auto;
+  }
+  #walk-earth {
+    top: calc(max(12px, env(safe-area-inset-top)) + 150px) !important;
+  }
+  /* while the free-fly pad is up, the info panel would sit under it */
+  body:has(#fly-pad:not([hidden])) #info { display: none; }
+}
 </style>
 </head>
 <body>
