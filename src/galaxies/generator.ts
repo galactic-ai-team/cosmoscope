@@ -71,14 +71,18 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
 
   const coreColor = new THREE.Color(0xfff5e6); // Warm yellow-white bulge
   const armColor = new THREE.Color(0x88ccff);  // Young blue star clusters
+  const hiiColor = new THREE.Color(0xff22aa);  // H II emission pink/magenta knots
   const dustColor = new THREE.Color(0x1a0f0a); // Dark brown/red dust
 
-  // 1. Generate Star Population
+  // 1. Generate Star Population (Bulge, Smooth Exponential Disk, Spiral Arms, and H II Knots)
   for (let i = 0; i < totalStars; i++) {
     const isBulge = !isElliptical && !isIrregular && (rng() < profile.bulgeFraction);
+    const isSmoothDisk = !isBulge && !isElliptical && !isIrregular && (rng() < 0.25); // 25% smooth disk share
+    const isHII = !isBulge && !isSmoothDisk && !isElliptical && !isIrregular && (rng() < 0.10); // 10% H II emission knots
 
     let x = 0, y = 0, z = 0;
     let importance = rng();
+    let starColor = new THREE.Color();
 
     if (isElliptical || isIrregular) {
       if (isIrregular && profile.armCount > 0 && i < totalStars * 0.5) {
@@ -98,11 +102,11 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
         y = r * Math.sin(phi) * Math.sin(theta);
         z = r * Math.cos(phi) * (isElliptical ? 0.7 : 0.4);
       }
+      starColor.copy(coreColor).lerp(armColor, 0.5);
     } else if (isBulge) {
       const bulgeRadius = radiusMeters * 0.22;
       
       if (isBarred && rng() < 0.4) {
-        // True planar bar in the disk plane (XY plane)
         const barLength = bulgeRadius * 1.5;
         const barWidth = bulgeRadius * 0.35;
         const t = (rng() - 0.5) * barLength;
@@ -119,13 +123,24 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
         z = r * Math.cos(phi) * 0.6;
       }
       importance += 0.5;
+      starColor.copy(coreColor);
+    } else if (isSmoothDisk) {
+      // Smooth exponential disk underneath arms to eliminate hollow gaps
+      const scaleLength = radiusMeters * 0.3;
+      const r = Math.min(-scaleLength * Math.log(1 - rng() * 0.99), radiusMeters);
+      const theta = rng() * Math.PI * 2;
+      x = Math.cos(theta) * r;
+      y = Math.sin(theta) * r;
+      z = (rng() - 0.5) * 0.02 * radiusMeters;
+      starColor.copy(coreColor).lerp(armColor, 0.6);
     } else {
+      // Spiral arms & H II emission regions
       const r = Math.pow(rng(), 0.8) * radiusMeters;
       const armIdx = Math.floor(rng() * arms);
       const armOffsetAngle = (armIdx / arms) * Math.PI * 2;
       
       const spiralAngle = (Math.log(Math.max(r, radiusMeters * 0.05) / (radiusMeters * 0.1)) / Math.tan(pitchRad)) + armOffsetAngle;
-      const scatter = 0.12 * radiusMeters;
+      const scatter = isHII ? 0.06 * radiusMeters : 0.12 * radiusMeters; // Tighter clustering for H II knots
 
       const offsetX = (rng() - 0.5) * scatter * (r / radiusMeters);
       const offsetY = (rng() - 0.5) * scatter * (r / radiusMeters);
@@ -134,18 +149,23 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
       x = Math.cos(spiralAngle) * r + offsetX;
       y = Math.sin(spiralAngle) * r + offsetY;
       z = verticalScatter;
+
+      if (isHII) {
+        starColor.copy(hiiColor);
+        importance += 0.4; // Keep H II knots in high LOD tiers
+      } else {
+        const distRatio = Math.hypot(x, y) / radiusMeters;
+        starColor.copy(coreColor).lerp(armColor, Math.min(distRatio * 1.2, 1.0));
+      }
     }
 
-    const distRatio = Math.hypot(x, y) / radiusMeters;
-    const color = new THREE.Color();
-    color.copy(coreColor).lerp(armColor, Math.min(distRatio * 1.2, 1.0));
     const lum = 0.7 + rng() * 0.6;
-    color.multiplyScalar(lum);
+    starColor.multiplyScalar(lum);
 
-    stars.push({ x, y, z, r: color.r, g: color.g, b: color.b, importance });
+    stars.push({ x, y, z, r: starColor.r, g: starColor.g, b: starColor.b, importance });
   }
 
-  // 2. Generate Separate Dust Lanes (Skip entirely for ellipticals)
+  // 2. Generate Separate Dust Lanes (Skip for ellipticals)
   if (!isElliptical) {
     const dustCount = Math.floor(totalStars * (profile.dustStrength * 0.2));
     for (let i = 0; i < dustCount; i++) {
@@ -271,4 +291,3 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     }
   };
 }
-
