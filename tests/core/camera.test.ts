@@ -89,7 +89,7 @@ describe('FrameApi additions for flyTo', () => {
     cam.update();
     expect(cam.getTarget()?.frame).toBe('cosmic');
     expect(cam.three.getWorldDirection(dir).x).toBeCloseTo(1, 6);
-    expect(cam.renderScale).toBe(1e23); // 16.5 Mpc ~ 5.1e23 m
+    expect(cam.renderScale / 1e23).toBeCloseTo(1, 9); // 16.5 Mpc ~ 5.1e23 m; relative check (pow(10, 23) is 1.0000000000000001e+23 on Node 24)
   });
 
   it('toFrame converts points between frames through the FrameApi', () => {
