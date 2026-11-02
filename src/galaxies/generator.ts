@@ -58,7 +58,6 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
   const rng = createSeededRng(profile.seed);
   const radiusMeters = (profile.diameterLy / 2) * METERS.ly;
 
-  // Respect profile starCountNear budget directly without artificial 1000 min clamping
   const totalStars = Math.min(Math.max(profile.starCountNear, 200), 12000);
   const stars: StarParticle[] = [];
   const dustStars: StarParticle[] = [];
@@ -82,7 +81,6 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     let importance = rng();
 
     if (isElliptical || isIrregular) {
-      // Irregulars with arms (e.g. LMC) route a share through spiral branch if armCount > 0
       if (isIrregular && profile.armCount > 0 && i < totalStars * 0.5) {
         const r = Math.pow(rng(), 0.8) * radiusMeters;
         const armIdx = Math.floor(rng() * arms);
@@ -101,19 +99,27 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
         z = r * Math.cos(phi) * (isElliptical ? 0.7 : 0.4);
       }
     } else if (isBulge) {
-      // Bulge radius is independent of bulgeFraction probability roll (~0.22R)
       const bulgeRadius = radiusMeters * 0.22;
-      const r = Math.pow(rng(), 2) * bulgeRadius;
-      const theta = rng() * Math.PI * 2;
-      const phi = Math.acos((rng() * 2) - 1);
       
-      const barStretch = isBarred && rng() < 0.5 ? 2.5 : 1.0;
-      x = r * Math.sin(phi) * Math.cos(theta) * barStretch;
-      y = r * Math.sin(phi) * Math.sin(theta);
-      z = r * Math.cos(phi) * 0.6;
+      if (isBarred && rng() < 0.4) {
+        // True planar bar in the disk plane (XY plane)
+        const barLength = bulgeRadius * 1.5;
+        const barWidth = bulgeRadius * 0.35;
+        const t = (rng() - 0.5) * barLength;
+        const perp = (rng() - 0.5) * barWidth;
+        x = t;
+        y = perp;
+        z = (rng() - 0.5) * barWidth * 0.4;
+      } else {
+        const r = Math.pow(rng(), 2) * bulgeRadius;
+        const theta = rng() * Math.PI * 2;
+        const phi = Math.acos((rng() * 2) - 1);
+        x = r * Math.sin(phi) * Math.cos(theta);
+        y = r * Math.sin(phi) * Math.sin(theta);
+        z = r * Math.cos(phi) * 0.6;
+      }
       importance += 0.5;
     } else {
-      // Spiral disk & arms
       const r = Math.pow(rng(), 0.8) * radiusMeters;
       const armIdx = Math.floor(rng() * arms);
       const armOffsetAngle = (armIdx / arms) * Math.PI * 2;
@@ -139,19 +145,21 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     stars.push({ x, y, z, r: color.r, g: color.g, b: color.b, importance });
   }
 
-  // 2. Generate Separate Dust Lanes (NormalBlending / Dark points)
-  const dustCount = Math.floor(totalStars * (profile.dustStrength * 0.2));
-  for (let i = 0; i < dustCount; i++) {
-    const r = Math.pow(rng(), 0.8) * radiusMeters * 0.8;
-    const armIdx = Math.floor(rng() * arms);
-    const armOffsetAngle = (armIdx / arms) * Math.PI * 2;
-    const spiralAngle = (Math.log(Math.max(r, radiusMeters * 0.05) / (radiusMeters * 0.1)) / Math.tan(pitchRad)) + armOffsetAngle - 0.05; // Inner edge of arm
+  // 2. Generate Separate Dust Lanes (Skip entirely for ellipticals)
+  if (!isElliptical) {
+    const dustCount = Math.floor(totalStars * (profile.dustStrength * 0.2));
+    for (let i = 0; i < dustCount; i++) {
+      const r = Math.pow(rng(), 0.8) * radiusMeters * 0.8;
+      const armIdx = Math.floor(rng() * arms);
+      const armOffsetAngle = (armIdx / arms) * Math.PI * 2;
+      const spiralAngle = (Math.log(Math.max(r, radiusMeters * 0.05) / (radiusMeters * 0.1)) / Math.tan(pitchRad)) + armOffsetAngle - 0.05;
 
-    const x = Math.cos(spiralAngle) * r + (rng() - 0.5) * 0.05 * radiusMeters;
-    const y = Math.sin(spiralAngle) * r + (rng() - 0.5) * 0.05 * radiusMeters;
-    const z = (rng() - 0.5) * 0.01 * radiusMeters;
+      const x = Math.cos(spiralAngle) * r + (rng() - 0.5) * 0.05 * radiusMeters;
+      const y = Math.sin(spiralAngle) * r + (rng() - 0.5) * 0.05 * radiusMeters;
+      const z = (rng() - 0.5) * 0.01 * radiusMeters;
 
-    dustStars.push({ x, y, z, r: dustColor.r, g: dustColor.g, b: dustColor.b, importance: 0.1 });
+      dustStars.push({ x, y, z, r: dustColor.r, g: dustColor.g, b: dustColor.b, importance: 0.1 });
+    }
   }
 
   stars.sort((a, b) => b.importance - a.importance);
@@ -163,7 +171,7 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     Math.floor(stars.length * 0.03)
   ];
 
-  // Build Star Mesh (XY plane disk)
+  // Build Star Mesh
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(stars.length * 3);
   const colors = new Float32Array(stars.length * 3);
@@ -195,7 +203,7 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
 
   const pointsMesh = new THREE.Points(geometry, material);
 
-  // Build Dust Mesh (NormalBlending for dark lanes)
+  // Build Dust Mesh
   let dustMesh: THREE.Points | null = null;
   let dustGeometry: THREE.BufferGeometry | null = null;
   let dustMaterial: THREE.PointsMaterial | null = null;
@@ -229,7 +237,6 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     dustMesh = new THREE.Points(dustGeometry, dustMaterial);
   }
 
-  // Correct orientation composition: R = Rz(PA) * Rx(incl)
   const incRad = THREE.MathUtils.degToRad(profile.inclinationDeg ?? 0);
   const paRad = THREE.MathUtils.degToRad(profile.positionAngleDeg ?? 0);
 
@@ -251,8 +258,8 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
       const t = Math.max(0, Math.min(tier, tierCounts.length - 1));
       geometry.setDrawRange(0, tierCounts[t]);
       material.size = t === 3 ? 5.0 : 3.0;
-      if (dustMesh && dustMaterial) {
-        dustMesh.visible = t <= 1; // Hide dust at lowest LOD tiers for performance
+      if (dustMesh) {
+        dustMesh.visible = t <= 1;
       }
     },
     dispose() {
@@ -264,3 +271,4 @@ export function createProceduralGalaxy(profile: GalaxyGeneratorParams): Generate
     }
   };
 }
+
