@@ -8,7 +8,7 @@ import { FrameBudget } from '../core/frameBudget';
 
 const BUDGET = 16.7;
 
-describe('FrameBudget � trailing window semantics', () => {
+describe('FrameBudget — trailing window semantics', () => {
   it('counts every over-budget frame in the window, not just consecutive', () => {
     const alarms: number[] = [];
     const fb = new FrameBudget({
@@ -28,11 +28,11 @@ describe('FrameBudget � trailing window semantics', () => {
     expect(fb.overFraction).toBeCloseTo(0.6, 5);
     expect(alarms.length).toBe(0); // exactly at threshold, not over
 
-    // Now tick 4 more slow frames � they evict the 4 oldest (3 slow + 1 fast).
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast � still 60%
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast � still 60%
-    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast � still 60%
-    fb.tick(30); // evict fast, add slow: 7 slow, 3 fast = 70% > 60% &#8594; alarm
+    // Now tick 4 more slow frames — they evict the 4 oldest (3 slow + 1 fast).
+    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
+    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
+    fb.tick(30); // evict slow, add slow: 6 slow, 4 fast — still 60%
+    fb.tick(30); // evict fast, add slow: 7 slow, 3 fast = 70% > 60% → alarm
     expect(alarms.length).toBe(1);
     expect(alarms[0]).toBeGreaterThan(0.6);
   });
@@ -96,7 +96,7 @@ describe('FrameBudget � trailing window semantics', () => {
     fb.tick(30); // 3
     fb.tick(30); // 4
     expect(onOverBudget).toHaveBeenCalledTimes(1);
-    fb.tick(30); // 5 &#8594; cooldown expired, alarm fires
+    fb.tick(30); // 5 → cooldown expired, alarm fires
     expect(onOverBudget).toHaveBeenCalledTimes(2);
   });
 
@@ -116,7 +116,7 @@ describe('FrameBudget � trailing window semantics', () => {
       expect(onOverBudget).not.toHaveBeenCalled();
     }
 
-    // 10th frame fills the window � alarm fires.
+    // 10th frame fills the window — alarm fires.
     fb.tick(30);
     expect(onOverBudget).toHaveBeenCalledTimes(1);
   });
