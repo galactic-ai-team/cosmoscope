@@ -7,6 +7,11 @@
 // - Auto: at the zoom floor (<= 1.25 R; controls stop at 1.05 R), keep
 //   zooming in (3 wheel notches, a pinch-out of similar size, or + three
 //   times) and it fades into earth-walker by itself.
+// - Flights: while a flyTo is in progress (flightActive()) the button is hidden
+//   and the auto-trigger is disarmed, so a flight that passes Earth on its way
+//   elsewhere never flashes the button or fires (Claude's #59 review).
+// - +/- keys typed into the search box (or any input/textarea/select/
+//   contenteditable) are ignored.
 // - Fade: ~0.9 s to black (0.15 s with reduced motion), then navigate. Esc or a
 //   tap cancels while fading. Coming back with the browser Back button (bfcache)
 //   clears the overlay and re-arms the trigger.
@@ -31,6 +36,8 @@ export interface WalkOnEarthDeps {
   canvas: HTMLElement;
   /** Null when Earth can't be resolved. */
   sample(): EarthSample | null;
+  /** True while a flyTo flight is moving the camera (hide button, no auto-fire). */
+  flightActive?(): boolean;
   reducedMotion?: boolean;
   navigate?: (url: string) => void;
   doc?: Document;
@@ -41,6 +48,14 @@ export function formatSpot(s: Pick<EarthSpot, 'lat' | 'lon'>): string {
   const lat = `${Math.abs(s.lat).toFixed(1)}°${s.lat >= 0 ? 'N' : 'S'}`;
   const lon = `${Math.abs(s.lon).toFixed(1)}°${s.lon >= 0 ? 'E' : 'W'}`;
   return `${lat} ${lon}`;
+}
+
+/** True when a key event comes from a text field, so it must not count as zoom. */
+export function isTypingTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || typeof el !== 'object') return false;
+  if (el.isContentEditable) return true;
+  return typeof el.tagName === 'string' && /^(INPUT|TEXTAREA|SELECT)$/i.test(el.tagName);
 }
 
 export function mountWalkOnEarth(deps: WalkOnEarthDeps): { update(): void; go(): void } {
@@ -109,8 +124,7 @@ export function mountWalkOnEarth(deps: WalkOnEarthDeps): { update(): void; go():
   }, { passive: true });
   doc.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const t = e.target as HTMLElement | null;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (isTypingTarget(e.target)) return;
     if (e.key === '+' || e.key === '=' || e.key === 'PageUp') trigger.zoomInput(1);
     else if (e.key === '-' || e.key === '_' || e.key === 'PageDown') trigger.zoomInput(-1);
   });
@@ -145,15 +159,18 @@ export function mountWalkOnEarth(deps: WalkOnEarthDeps): { update(): void; go():
   return {
     go,
     update() {
+      const flying = deps.flightActive?.() === true;
       const s = deps.sample();
       const r = trigger.update(s ? s.distanceR : Infinity);
-      const show = r.showButton && timer === null;
+      // Mid-flight: no button, and no zoom-in carried over into the arrival.
+      if (flying) trigger.reset();
+      const show = r.showButton && timer === null && !flying;
       if (btn.hidden === show) btn.hidden = !show;
       if (show && s) {
         const text = formatSpot(s.spot());
         if (text !== lastSpotText) { lastSpotText = text; where.textContent = text; }
       }
-      if (r.fire) go();
+      if (r.fire && !flying) go();
     },
   };
 }

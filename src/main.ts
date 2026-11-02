@@ -189,6 +189,7 @@ const earthUp = new Float64Array(3);
 const walkOnEarth = mountWalkOnEarth({
   canvas: renderer.domElement,
   reducedMotion,
+  flightActive: () => flight.active, // hide/disarm while a flyTo passes Earth
   sample(): EarthSample | null {
     const r = registry.resolveTarget(EARTH_ID);
     if (!r || !r.radius) return null;
