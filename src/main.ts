@@ -15,7 +15,7 @@ import { FlyToController, type FlyToTarget, type FlyToHandle } from './core/flyT
 import { CosmoControls } from './core/controls';
 import { LayerRegistry, type ScaleLayer } from './core/layers';
 import { createStubOrbitLayer, type StubLayer } from './core/stubLayer';
-import { createGalaxiesLayer, clustersRoute } from './layers/galaxies';
+import { createGalaxiesLayer, clustersRoute, nearestGalaxy } from './layers/galaxies';
 import { createCosmicWebLayer } from './layers/cosmicWebLayer';
 import { createProceduralGalaxiesLayer } from './ui/proceduralGalaxies';
 import { SolarSystemLayer } from './layers/solarSystemLayer';
@@ -264,8 +264,12 @@ const walkOnEarth = mountWalkOnEarth({
 
 // ---- free-fly (Claude's CosmoFlyControls; Lumi's wiring + UI in src/ui/freeFly.ts) ----
 // Speed scales with the distance to the nearest SURFACE among the Sun, the
-// planets (their rendered, enlarged spheres) and the last picked target.
+// planets (their rendered, enlarged spheres), the last picked target and the
+// nearest catalog galaxy. Galaxies go in with radius 0: speed follows the
+// distance to the centre, so you ease in instead of overshooting, and a
+// galaxy is never a wall (radius 0 skips free-fly's no-fly-into clearance).
 const flyCands: BodyCandidate[] = [];
+const flyGalPos = new Float64Array(3);
 const fly = new CosmoFlyControls(camera, {
   reducedMotion,
   speedForDistance: freeFlySpeedForDistance, // full gap per second (Claude's default is half)
@@ -280,6 +284,8 @@ const fly = new CosmoFlyControls(camera, {
         radius: r.radius ? r.radius * camera.unitsPerFrame(r.frameId) : 0,
       });
     }
+    const g = nearestGalaxy(camera.getCameraWorldPosition('galactic', flyGalPos));
+    if (g) flyCands.push({ point: { frame: 'galactic', position: g.position }, radius: 0 });
     return pickNearestBody(flyCands, (p) => camera.distanceTo(p));
   },
 });

@@ -281,6 +281,48 @@ function makeGlowTexture(): THREE.Texture {
 // galaxies are visible at all distances (we see Andromeda from Earth!).
 export const STAR_HANDOFF_LY = { fadeStart: 60_000, fadeEnd: 100_000 } as const;
 
+/**
+ * Nearest catalog galaxy or cluster to a galactic-frame point (parsecs), for
+ * free-fly speed scaling (Claude): without it, speed stays scaled to the
+ * Sun's distance and you shoot straight past a galaxy you're heading for.
+ * A plain scan; the catalog is a few dozen bodies, so it's cheap per frame.
+ * Returns a shared, reused object (no per-frame allocation): read it
+ * before the next call.
+ */
+export function nearestGalaxy(posPc: ArrayLike<number>): Readonly<NearestGalaxy> | null {
+  let best = -1;
+  let bestD2 = Infinity;
+  for (let i = 0; i < BODIES.length; i++) {
+    const dx = positionsPc[i * 3] - posPc[0];
+    const dy = positionsPc[i * 3 + 1] - posPc[1];
+    const dz = positionsPc[i * 3 + 2] - posPc[2];
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = i;
+    }
+  }
+  if (best < 0) return null;
+  nearestScratch.id = BODIES[best].id;
+  nearestScratch.position[0] = positionsPc[best * 3];
+  nearestScratch.position[1] = positionsPc[best * 3 + 1];
+  nearestScratch.position[2] = positionsPc[best * 3 + 2];
+  nearestScratch.radiusPc = diametersPc[best] / 2;
+  nearestScratch.distancePc = Math.sqrt(bestD2);
+  return nearestScratch;
+}
+
+export interface NearestGalaxy {
+  id: string;
+  /** Centre, galactic frame, parsecs. */
+  position: Float64Array;
+  /** Catalog radius, parsecs. */
+  radiusPc: number;
+  /** Distance from the query point to the centre, parsecs. */
+  distancePc: number;
+}
+const nearestScratch: NearestGalaxy = { id: '', position: new Float64Array(3), radiusPc: 0, distancePc: Infinity };
+
 /** Shared resolveTarget: both layers route ids through the same data. */
 function resolveGalaxyTarget(id: string): ResolvedTarget | null {
   const i = byId.get(id);
