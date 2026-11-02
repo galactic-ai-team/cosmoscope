@@ -1,8 +1,4 @@
 // src/__tests__/frameBudget.test.ts
-// Tests for FrameBudget. Semantics: trailing-window over-budget count, not
-// consecutive streak; alarm requires a full window (warm-up) and fires at
-// most once per cooldown period.
-
 import { describe, expect, it, vi } from 'vitest';
 import { FrameBudget } from '../core/frameBudget';
 
@@ -32,14 +28,13 @@ describe('FrameBudget — trailing window semantics', () => {
     // Ring layout after fill (head at index 0, oldest first):
     //   [slow, slow, slow, slow, slow, slow, fast, fast, fast, fast]
     // Each tick(30) evicts the oldest slot and inserts a slow at the tail.
-    // Ticks 1-4 evict four of the slow frames → still 6 slow, 4 fast.
-    // Tick 5 evicts a fast frame → 7 slow, 3 fast = 0.7 > 0.6 → alarm.
-    fb.tick(30); // evict slow → 6 slow, 4 fast
-    fb.tick(30); // evict slow → 6 slow, 4 fast
-    fb.tick(30); // evict slow → 6 slow, 4 fast
-    fb.tick(30); // evict slow → 6 slow, 4 fast
-    expect(alarms.length).toBe(0);
-    expect(fb.overFraction).toBeCloseTo(0.6, 5);
+    // Ticks 1-6 evict the six slow slots → still 6 slow, 4 fast = 60%.
+    // Tick 7 evicts the first fast slot → 7 slow, 3 fast = 70% → alarm.
+    for (let i = 0; i < 6; i++) {
+      fb.tick(30);
+      expect(alarms.length).toBe(0);
+      expect(fb.overFraction).toBeCloseTo(0.6, 5);
+    }
 
     fb.tick(30); // evict fast → 7 slow, 3 fast = 70% → alarm
     expect(alarms.length).toBe(1);
@@ -56,8 +51,6 @@ describe('FrameBudget — trailing window semantics', () => {
       onOverBudget: (f) => alarms.push(f),
     });
 
-    // 3 slow, 1 fast, 2 slow = 5/6 = 83% over. A consecutive-only tracker
-    // would have counted 2, not 5.
     fb.tick(30); fb.tick(30); fb.tick(30);
     fb.tick(5);
     fb.tick(30); fb.tick(30);
@@ -91,13 +84,11 @@ describe('FrameBudget — trailing window semantics', () => {
       onOverBudget,
     });
 
-    // Warm-up requires full window (4 frames). Alarm fires on tick 4.
     fb.tick(30); fb.tick(30); fb.tick(30);
     expect(onOverBudget).not.toHaveBeenCalled();
     fb.tick(30);
     expect(onOverBudget).toHaveBeenCalledTimes(1);
 
-    // Cooldown 5: next alarm at framesSinceAlarm >= 5, i.e. 5 ticks later.
     fb.tick(30); // 1
     fb.tick(30); // 2
     fb.tick(30); // 3
@@ -117,13 +108,11 @@ describe('FrameBudget — trailing window semantics', () => {
       onOverBudget,
     });
 
-    // First 9 slow frames: window not yet full, no alarm.
     for (let i = 0; i < 9; i++) {
       fb.tick(30);
       expect(onOverBudget).not.toHaveBeenCalled();
     }
 
-    // 10th frame fills the window — alarm fires.
     fb.tick(30);
     expect(onOverBudget).toHaveBeenCalledTimes(1);
   });
